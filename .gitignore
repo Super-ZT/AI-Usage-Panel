@@ -1,0 +1,46 @@
+# Runtime state — never committed; lives in the per-user data directory at
+# runtime, these entries also catch legacy/portable installs.
+state.json
+state.json.migrated
+state.json.*.tmp
+device.json
+sync-cursor.json
+events/
+
+# Local configuration may contain credentials or private paths.
+config.json
+config.local.json
+
+# Central collector and database data.
+node_modules/
+*.tgz
+server/collector-data/
+collector-data/
+**/access-key
+**/*.db
+**/*.sqlite*
+**/*.log
+**/sessions/
+**/quarantine/
+.env
+.env.*
+graphify-out/
+**/graphify-out/
+backups/
+ops/compose.env
+ops/secrets.env
+ops/postgres-password
+
+# Build artefacts
+app/*.exe
+app/*.dll
+icons/*.png
+!icons/logo-1024.png
+
+# Internal working notes, not product documentation
+BUILD-PROMPT.md
+CALCULATION-REPORT.md
+
+# Editor / OS
+.DS_Store
+Thumbs.db

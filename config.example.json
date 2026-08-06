@@ -1,0 +1,48 @@
+{
+  "port": 8899,
+  "pollSeconds": 10,
+  "scanWindowDays": 45,
+  "claude": {
+    "enabled": true,
+    "windowHours": 5
+  },
+  "codex": {
+    "enabled": true
+  },
+  "grok": {
+    "enabled": true,
+    "cacheSeconds": 60
+  },
+  "openrouter": {
+    "enabled": true,
+    "apiKey": ""
+  },
+  "kimi": { "enabled": false },
+  "gemini": { "enabled": false },
+  "paths": {},
+  "proxy": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 8898,
+    "injectUsageReporting": true,
+    "providers": {}
+  },
+  "pricing": {
+    "codexPriceModel": "gpt-5.6-sol",
+    "overrides": {
+      "codex-auto-review": "openai/gpt-5.6-sol"
+    }
+  },
+  "sync": {
+    "enabled": false,
+    "endpoint": "",
+    "deviceCredential": "",
+    "deviceId": "",
+    "liveDelaySeconds": 5,
+    "localPollSeconds": 15,
+    "intervalMinutes": 5,
+    "batchSize": 500,
+    "lookbackDays": 45,
+    "allowInsecure": false
+  }
+}

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Usage Panel — Manager</title>
+  <link rel="stylesheet" href="/manager/manager.css">
+  <script src="/manager/manager.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <main id="main" class="shell">
+    <section id="login-view" class="login-card" aria-labelledby="login-title">
+      <p class="eyebrow">Usage Panel</p>
+      <h1 id="login-title">Company dashboard</h1>
+      <p class="muted">Sign in to see company-wide usage. Employee activity stays on each computer; this screen receives token totals only.</p>
+      <form id="login-form">
+        <label for="email">Work email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required maxlength="254">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="1024">
+        <button type="submit">Sign in</button>
+      </form>
+      <p id="login-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="dashboard-view" hidden>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Usage Panel</p>
+          <h1>Company overview</h1>
+          <p id="manager-label" class="muted"></p>
+        </div>
+        <button id="logout" class="secondary" type="button">Sign out</button>
+      </header>
+
+      <form id="filters" class="filters" aria-label="Usage filters">
+        <div>
+          <label for="days">Time range</label>
+          <select id="days" name="days">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">Last year</option>
+          </select>
+        </div>
+        <div>
+          <label for="device-filter">Device</label>
+          <select id="device-filter" name="device"><option value="">All devices</option></select>
+        </div>
+        <div>
+          <label for="tool-filter">Tool</label>
+          <select id="tool-filter" name="tool"><option value="">All tools</option></select>
+        </div>
+        <button type="submit">Apply</button>
+      </form>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <section aria-labelledby="summary-title">
+        <div class="section-heading">
+          <div><h2 id="summary-title">Usage summary</h2><p id="range-label" class="muted"></p></div>
+          <span id="pricing-status" class="badge"></span>
+        </div>
+        <div class="metrics">
+          <article class="metric accent">
+            <h3>OpenRouter-equivalent estimate</h3>
+            <p id="total-cost">—</p>
+            <small id="money-caption">OpenRouter-equivalent estimate from token buckets · catalogue estimate only, not an invoice</small>
+          </article>
+          <article class="metric"><h3>Input</h3><p id="tokens-in">—</p></article>
+          <article class="metric"><h3>Output</h3><p id="tokens-out">—</p></article>
+          <article class="metric"><h3>Cache read</h3><p id="cache-read">—</p></article>
+          <article class="metric"><h3>Cache write</h3><p id="cache-write">—</p></article>
+        </div>
+        <p id="catalogue-version" class="muted subtle-line"></p>
+        <div id="pricing-warning" class="warning" hidden></div>
+      </section>
+
+      <section aria-labelledby="reporting-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="reporting-title">Provider reporting</h2>
+            <p class="muted">Labels match the accuracy contract. Uploaded rows are task counters or local only until server-side provider reconciliation exists. Account-window figures stay separate from task rows. Private provider, account, and conversation identifiers are never shown.</p>
+          </div>
+        </div>
+        <ul id="reporting-list" class="reporting-list"></ul>
+      </section>
+
+      <section aria-labelledby="devices-title">
+        <div class="section-heading">
+          <div><h2 id="devices-title">Devices</h2><p class="muted">Read-only usage view. Account linking and device management happen in Super ZT.</p></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Device</th>
+                <th scope="col">Status</th>
+                <th scope="col">Input</th>
+                <th scope="col">Output</th>
+                <th scope="col">Cache read</th>
+                <th scope="col">Cache write</th>
+                <th scope="col">OpenRouter-equivalent estimate</th>
+                <th scope="col"><span class="sr-only">Details</span></th>
+              </tr>
+            </thead>
+            <tbody id="device-rows"></tbody>
+          </table>
+        </div>
+        <p id="devices-empty" class="empty" hidden>No devices have enrolled yet.</p>
+      </section>
+
+      <section aria-labelledby="tools-title">
+        <div class="section-heading"><div><h2 id="tools-title">Tools</h2><p class="muted">Usage grouped by local coding harness.</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Tool</th>
+                <th scope="col">Reporting</th>
+                <th scope="col">Calls</th>
+                <th scope="col">Input</th>
+                <th scope="col">Output</th>
+                <th scope="col">Cache read</th>
+                <th scope="col">Cache write</th>
+                <th scope="col">Evidence</th>
+                <th scope="col">OpenRouter-equivalent estimate</th>
+              </tr>
+            </thead>
+            <tbody id="tool-rows"></tbody>
+          </table>
+        </div>
+        <p id="tools-empty" class="empty" hidden>No usage matches these filters.</p>
+      </section>
+
+      <section aria-labelledby="models-title">
+        <div class="section-heading"><div><h2 id="models-title">Models</h2><p class="muted">Usage grouped by model identity. Missing identity stays unknown, never guessed.</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Model</th>
+                <th scope="col">Calls</th>
+                <th scope="col">Input</th>
+                <th scope="col">Output</th>
+                <th scope="col">Cache read</th>
+                <th scope="col">Cache write</th>
+                <th scope="col">Evidence</th>
+                <th scope="col">OpenRouter-equivalent estimate</th>
+                <th scope="col">Sources</th>
+              </tr>
+            </thead>
+            <tbody id="model-rows"></tbody>
+          </table>
+        </div>
+        <p id="models-empty" class="empty" hidden>No model rows match these filters.</p>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

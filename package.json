@@ -1,0 +1,60 @@
+{
+  "name": "usage-panel",
+  "version": "1.0.0",
+  "description": "Local dashboard for AI coding subscription usage, quota and cost across every harness installed on the machine.",
+  "main": "refresher.js",
+  "bin": {
+    "usage-panel": "./bin/usage-panel.js"
+  },
+  "scripts": {
+    "start": "node refresher.js",
+    "accuracy:codex": "node scripts/prove-codex-accuracy.js",
+    "test": "node test/proxy.test.js && node test/events.test.js && node test/adapters.test.js && node test/local-usage.test.js && node test/sync.test.js && node test/dashboard.test.js && node test/accounts.test.js && node test/operations.test.js && node test/compose-healthcheck.test.js && sh test/package.test.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/usage-panel.js",
+    "scripts/prove-codex-accuracy.js",
+    "scripts/fixtures/codex-real-probe-2026-08-06.jsonl",
+    "src/adapters/agent-zero.js",
+    "src/adapters/index.js",
+    "src/core/device.js",
+    "src/core/events.js",
+    "src/core/local-usage.js",
+    "src/core/paths.js",
+    "src/core/pricing-snapshot.json",
+    "src/core/pricing.js",
+    "src/core/runtime-config.js",
+    "src/detect/index.js",
+    "src/detect/registry.js",
+    "src/proxy/capture.js",
+    "src/proxy/index.js",
+    "src/proxy/upstreams.js",
+    "src/sync/client.js",
+    "src/sync/outbox.js",
+    "refresher.js",
+    "dashboard.html",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "usage",
+    "tokens",
+    "cost",
+    "dashboard",
+    "claude",
+    "codex",
+    "openrouter",
+    "llm"
+  ],
+  "license": "MIT",
+  "private": false,
+  "dependencies": {},
+  "devDependencies": {
+    "pg": "^8.16.3"
+  }
+}

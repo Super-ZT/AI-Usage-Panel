@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#25a878"/>
+      <stop offset="1" stop-color="#5ce8b0"/>
+    </linearGradient>
+  </defs>
+  <!-- dark rounded tile -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#0d0f0e" stroke="#2a2f2d" stroke-width="4"/>
+  <!-- gauge track -->
+  <circle cx="128" cy="128" r="76" fill="none" stroke="#1c211f" stroke-width="18"/>
+  <!-- gauge arc: 270° sweep clockwise from 12 o'clock -->
+  <circle cx="128" cy="128" r="76" fill="none" stroke="url(#g)" stroke-width="18" stroke-linecap="round"
+    stroke-dasharray="358.1 477.5" transform="rotate(-90 128 128)"/>
+  <!-- knob at arc tip (9 o'clock) -->
+  <circle cx="52" cy="128" r="14" fill="#0d0f0e" stroke="#5ce8b0" stroke-width="7"/>
+  <!-- ascending usage bars -->
+  <rect x="99" y="138" width="14" height="24" rx="5" fill="#1f5a47"/>
+  <rect x="121" y="124" width="14" height="38" rx="5" fill="#2f8a6b"/>
+  <rect x="143" y="106" width="14" height="56" rx="5" fill="#5ce8b0"/>
+</svg>

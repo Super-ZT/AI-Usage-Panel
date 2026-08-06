@@ -1,0 +1,37 @@
+@echo off
+REM Usage Panel — starts the local server and restarts it if it exits.
+REM Locates Node automatically; no machine-specific paths.
+setlocal
+cd /d "%~dp0"
+
+set "NODE_EXE="
+
+REM 1. Explicit override wins.
+if defined USAGE_PANEL_NODE if exist "%USAGE_PANEL_NODE%" set "NODE_EXE=%USAGE_PANEL_NODE%"
+
+REM 2. Node on PATH.
+if not defined NODE_EXE (
+  for /f "delims=" %%i in ('where node 2^>nul') do (
+    if not defined NODE_EXE set "NODE_EXE=%%i"
+  )
+)
+
+REM 3. Common install locations.
+if not defined NODE_EXE if exist "%ProgramFiles%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles%\nodejs\node.exe"
+if not defined NODE_EXE if exist "%ProgramFiles(x86)%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles(x86)%\nodejs\node.exe"
+if not defined NODE_EXE if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
+
+REM 4. A Node bundled next to the app (portable install).
+if not defined NODE_EXE if exist "%~dp0node\node.exe" set "NODE_EXE=%~dp0node\node.exe"
+
+if not defined NODE_EXE (
+  echo Node.js was not found.
+  echo Install it from https://nodejs.org, or set USAGE_PANEL_NODE to node.exe
+  exit /b 1
+)
+
+:loop
+"%NODE_EXE%" "%~dp0refresher.js"
+if "%errorlevel%"=="66" exit /b 0
+timeout /t 3 /nobreak >nul
+goto loop

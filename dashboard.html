@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>USAGE_PANEL</title>
+<link rel="icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="256x256" href="/logo-256.png" />
+<link rel="apple-touch-icon" href="/logo-192.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#0a0b0b" />
+<style>
+  :root {
+    --bg: #0a0b0b; --panel: #0e100f; --line: #1c1f1e; --line2: #242827;
+    --txt: #e6e8e7; --mut: #8a918e; --dim: #565d5a;
+    --mint: #3fd99a; --gold: #e8b33c; --red: #ef5350; --track: #1b201e;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--txt);
+    font-family: "Cascadia Mono", ui-monospace, Consolas, "JetBrains Mono", monospace;
+    font-size: 12.5px; min-height: 100vh;
+  }
+  .lbl { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 13px; font-weight: 700; letter-spacing: 5px; }
+  .hb { display: flex; gap: 18px; align-items: center; color: var(--dim); font-size: 11px; }
+  .hb a { color: var(--dim); text-decoration: none; cursor: pointer; }
+  .hb a:hover { color: var(--mint); }
+  .wrap { padding: 20px 22px; }
+  main { flex: 1; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); min-width: 0; }
+  .card { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px 12px; display: flex; flex-direction: column; min-height: 190px; }
+  .card.dim { opacity: .5; }
+  .chead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  .ctitle { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--txt); font-weight: 700; }
+  .csub { color: var(--mint); font-size: 11px; letter-spacing: 1px; margin-bottom: 12px; }
+  .csub.warn { color: var(--gold); } .csub.crit { color: var(--red); }
+  .body { display: flex; gap: 20px; align-items: flex-start; flex: 1; }
+  .ringwrap { position: relative; width: 78px; height: 78px; flex: 0 0 auto; }
+  .ringwrap svg { transform: rotate(-90deg); }
+  .ringwrap circle { transition: stroke-dasharray .9s cubic-bezier(.4,0,.2,1); }
+  .ringtxt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .ringtxt b { font-size: 17px; font-weight: 700; }
+  .ringtxt b small { font-size: 10px; font-weight: 400; color: var(--mut); }
+  .ringtxt span { font-size: 8.5px; letter-spacing: 1.5px; color: var(--dim); }
+  .bars { flex: 1; display: flex; flex-direction: column; gap: 13px; min-width: 0; }
+  .brow .r1 { display: flex; justify-content: space-between; align-items: baseline; }
+  .bname { color: var(--txt); font-weight: 700; font-size: 12px; }
+  .bpct { font-size: 11px; font-weight: 700; }
+  .bpct small { color: var(--dim); font-weight: 400; font-size: 9px; letter-spacing: 1px; margin-left: 3px; }
+  .btime { color: var(--mut); font-size: 10.5px; margin-top: 1px; }
+  .track { position: relative; height: 3px; background: var(--track); margin-top: 7px; border-radius: 2px; }
+  .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--mint); transition: width .9s cubic-bezier(.4,0,.2,1), background .4s; }
+  .knob { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--mint); transform: translate(-50%, -50%); transition: left .9s cubic-bezier(.4,0,.2,1), border-color .4s; }
+  .cfoot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .cfoot .l { display: flex; gap: 16px; }
+  .cfoot .k { font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); }
+  .cfoot .k b { color: var(--mut); font-weight: 700; }
+  .refresh { font-size: 10px; letter-spacing: 1px; color: var(--dim); cursor: pointer; text-decoration: none; }
+  .refresh:hover { color: var(--mint); }
+  .kvrow { display: flex; gap: 22px; margin-top: 10px; flex-wrap: wrap; }
+  .kv .k { font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); }
+  .kv .v { font-size: 12.5px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .kv .v small { color: var(--mut); font-weight: 400; }
+  .pend { display: flex; flex: 1; align-items: center; justify-content: center; flex-direction: column; gap: 8px; color: var(--dim); }
+  .pend .lbl { letter-spacing: 3px; }
+  footer { padding: 10px 22px 18px; color: var(--dim); font-size: 10px; letter-spacing: 1px; }
+  .tokcard { grid-column: 1 / -1; }
+  .toktabs { display: flex; gap: 2px; }
+  .toktabs a { font-size: 10px; letter-spacing: 1.5px; padding: 3px 10px; color: var(--dim); cursor: pointer; border: 1px solid var(--line); }
+  .toktabs a.on { color: var(--mint); border-color: var(--mint); }
+  .toktbl { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .toktbl th { font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); font-weight: 700; }
+  .toktbl th:first-child, .toktbl td:first-child { text-align: left; }
+  .toktbl td { font-size: 11.5px; text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--txt); }
+  .toktbl td.mut { color: var(--mut); }
+  .toktbl tr:last-child td { border-bottom: 0; }
+  .toktbl .tot { color: var(--mint); font-weight: 700; }
+  .toknote { color: var(--dim); font-size: 9.5px; letter-spacing: .5px; margin-top: 8px; }
+  .hgrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); margin-top: 10px; }
+  .hcell { border: 1px solid var(--line); padding: 10px 12px; }
+  .hcell .hname { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; }
+  .hcell .hcost { font-size: 17px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .hcell .hmeta { color: var(--mut); font-size: 10px; margin-top: 2px; }
+  .hcell .hmodels { color: var(--dim); font-size: 9.5px; margin-top: 6px; line-height: 1.5; word-break: break-word; }
+  .setup { border: 1px dashed var(--line2); padding: 12px 14px; margin-top: 10px; }
+  .setup code { color: var(--mint); font-size: 11px; word-break: break-all; }
+  .setup .k { font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 style="display:flex;align-items:center;gap:10px">
+    <svg width="20" height="20" viewBox="0 0 256 256" aria-hidden="true">
+      <circle cx="128" cy="128" r="76" fill="none" stroke="#1c211f" stroke-width="22"/>
+      <circle cx="128" cy="128" r="76" fill="none" stroke="#3fd99a" stroke-width="22" stroke-linecap="round" stroke-dasharray="358.1 477.5" transform="rotate(-90 128 128)"/>
+      <circle cx="52" cy="128" r="16" fill="var(--bg)" stroke="#5ce8b0" stroke-width="10"/>
+      <rect x="99" y="138" width="16" height="24" rx="6" fill="#1f5a47"/>
+      <rect x="121" y="124" width="16" height="38" rx="6" fill="#2f8a6b"/>
+      <rect x="143" y="106" width="16" height="56" rx="6" fill="#5ce8b0"/>
+    </svg>
+    USAGE_PANEL
+  </h1>
+  <div class="hb"><span id="upd">—</span><a id="refall">⟳ refresh all</a></div>
+</header>
+<div class="wrap"><main id="grid"></main></div>
+<div id="harnwrap" style="padding:0 22px 0"></div>
+<div id="detectwrap" style="padding:0 22px 0"></div>
+<div id="tokwrap" style="padding:0 22px 0"></div>
+<footer>SOURCES: CLAUDE OAUTH /USAGE · CODEX SESSION LOGS · OPENROUTER API — ESTIMATES WHERE MARKED ~</footer>
+
+<script>
+let latest = null;
+
+// Escapes quotes too: values are only used as text today, but one refactor
+// into an attribute would otherwise become an injection point.
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function colorFor(left){ return left<=8?'var(--red)':left<=20?'var(--gold)':'var(--mint)'; }
+function sevClass(left){ return left<=8?'crit':left<=20?'warn':''; }
+function fmtNum(n){ if(n==null||isNaN(n)) return '—'; n=Number(n);
+  if(Math.abs(n)>=1e9) return (n/1e9).toFixed(2)+'B';
+  if(Math.abs(n)>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(Math.abs(n)>=1e3) return (n/1e3).toFixed(1)+'K';
+  return String(Math.round(n)); }
+function money(n){ if(n==null||isNaN(n)) return '—'; return '$'+Number(n).toFixed(2); }
+function abs(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'}); }
+function durShort(ms){ if(ms==null||ms<0) return '—'; const s=Math.floor(ms/1000);
+  const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
+  if(d>0) return d+'D '+(h>0?h+'H':''); if(h>0) return h+'H '+m+'M'; if(m>0) return m+'M'; return s+'S'; }
+
+// ---------- quota cards (rebuilt only when data changes) ----------
+function ring(leftPct){
+  const r=32, c=2*Math.PI*r;
+  const shown = leftPct==null ? 0 : Math.max(0,Math.min(100,leftPct));
+  const col = leftPct==null ? 'var(--line2)' : colorFor(shown);
+  const dash = (shown/100*c).toFixed(1)+' '+c.toFixed(1);
+  return '<div class="ringwrap"><svg width="78" height="78" viewBox="0 0 78 78">'
+    + '<circle cx="39" cy="39" r="'+r+'" fill="none" stroke="var(--track)" stroke-width="5"/>'
+    + '<circle cx="39" cy="39" r="'+r+'" fill="none" stroke="'+col+'" stroke-width="5" stroke-linecap="round" stroke-dasharray="'+dash+'"/>'
+    + '</svg><div class="ringtxt"><b>'+(leftPct==null?'—':Math.round(shown)+'<small>%</small>')+'</b><span>LEFT</span></div></div>';
+}
+
+function bar(name, w){
+  if(!w || w.percent==null) return '';
+  const left = Math.max(0, 100 - w.percent);
+  const col = colorFor(left);
+  return '<div class="brow">'
+    + '<div class="r1"><span class="bname">'+esc(name)+'</span>'
+    + '<span class="bpct" style="color:'+col+'">'+Math.round(left)+'%<small>LEFT</small></span></div>'
+    + '<div class="btime">'+abs(w.resetAt)+' <span style="color:var(--dim)">·</span> <span data-count="'+(w.resetAt||'')+'">'+durShort((w.resetAt||0)-Date.now())+'</span></div>'
+    + '<div class="track"><div class="fill" style="width:'+left+'%;background:'+col+'"></div><div class="knob" style="left:'+left+'%;border-color:'+col+'"></div></div>'
+    + '</div>';
+}
+
+function foot(items, id){
+  return '<div class="cfoot"><div class="l">'
+    + items.filter(Boolean).map(([k,v])=>'<span class="k">'+k+' <b>'+v+'</b></span>').join('')
+    + '</div><a class="refresh" data-refresh="'+id+'">refresh</a></div>';
+}
+
+function pendCard(id, name){
+  return '<div class="card dim"><div class="chead"><span class="ctitle">'+name+' QUOTA</span></div>'
+    + '<div class="csub" style="color:var(--dim)">week limit</div>'
+    + '<div class="body">'+ring(null)
+    + '<div class="pend"><span class="lbl">pending connection</span><span style="font-size:10px">no data source linked yet</span></div></div>'
+    + foot([['STATUS','OFFLINE']], id) + '</div>';
+}
+
+function claudeCard(p){
+  if(p.status!=='ok') return errCard('claude','CLAUDE',p);
+  if(p.kind==='window'){ // log fallback
+    return '<div class="card"><div class="chead"><span class="ctitle">CLAUDE QUOTA</span></div>'
+      + '<div class="csub warn">local log estimate ~</div>'
+      + '<div class="body">'+ring(null)+'<div class="bars">'
+      + '<div class="kvrow">'
+      + '<div class="kv"><div class="k">window tok</div><div class="v">'+fmtNum(p.windowTokens)+'</div></div>'
+      + '<div class="kv"><div class="k">burn/h</div><div class="v">'+fmtNum(p.burnPerHour)+'</div></div>'
+      + '<div class="kv"><div class="k">7d tok</div><div class="v">'+fmtNum(p.weekTokens)+'</div></div>'
+      + '</div><div class="btime" style="margin-top:8px">'+esc(p.note||'')+'</div></div></div>'
+      + foot([['RESET','<span data-count="'+(p.resetAt||'')+'">'+durShort((p.resetAt||0)-Date.now())+'</span>']],'claude')+'</div>';
+  }
+  const wk = p.weekly, ss = p.session;
+  const wkLeft = wk&&wk.percent!=null ? 100-wk.percent : null;
+  const bars = [ bar('session', ss) ]
+    .concat((p.scoped||[]).map(s=>bar(s.name+' week', s)))
+    .join('');
+  const worstFinish = [ss,wk].concat(p.scoped||[]).filter(w=>w&&w.finishAt).sort((a,b)=>a.finishAt-b.finishAt)[0];
+  const stale = p.stale && p.fetchedAt;
+  const csub = stale
+    ? '<div class="csub crit">⚠ STALE — showing '+new Date(p.fetchedAt).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})+' data · waiting for token refresh</div>'
+    : '<div class="csub '+sevClass(wkLeft==null?100:wkLeft)+'">week limit</div>';
+  return '<div class="card"><div class="chead"><span class="ctitle">CLAUDE QUOTA</span></div>'
+    + csub
+    + '<div class="body">'+ring(wkLeft)+'<div class="bars">'+bars+'</div></div>'
+    + foot([
+        ['WEEK RESET', wk&&wk.resetAt?'<span data-count="'+wk.resetAt+'">'+durShort(wk.resetAt-Date.now())+'</span>':'—'],
+        ['~FINISH', worstFinish?abs(worstFinish.finishAt):'—'],
+        [esc(String(p.plan||'').toUpperCase()), new Date(latest.generatedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})]
+      ],'claude') + '</div>';
+}
+
+function codexCard(p){
+  if(p.status!=='ok') return errCard('codex','CODEX',p);
+  const pr = p.primary||{}, sec = p.secondary;
+  const left = pr.usedPercent!=null ? 100-pr.usedPercent : null;
+  const win = pr.windowMinutes||0;
+  const winName = win===10080?'week limit':win===300?'5h limit':(win?Math.round(win/60)+'h limit':'limit');
+  const prw = { percent: pr.usedPercent, resetAt: pr.resetAt, finishAt: pr.finishAt };
+  const secw = sec&&sec.usedPercent!=null ? { percent: sec.usedPercent, resetAt: sec.resetAt } : null;
+  return '<div class="card"><div class="chead"><span class="ctitle">CODEX QUOTA</span></div>'
+    + '<div class="csub '+sevClass(left==null?100:left)+'">'+winName+'</div>'
+    + '<div class="body">'+ring(left)+'<div class="bars">'
+    + bar(win===10080?'week':'window', prw)
+    + (secw?bar('secondary', secw):'')
+    + (p.scoped||[]).map(s=>bar(s.name, {percent:s.usedPercent, resetAt:s.resetAt})).join('')
+    + '<div class="kvrow"><div class="kv"><div class="k">credits</div><div class="v">$'+esc(p.creditsBalance!=null?p.creditsBalance:'0')+'</div></div>'
+    + '<div class="kv"><div class="k">~burn</div><div class="v">'+(pr.ratePerHour!=null?pr.ratePerHour.toFixed(2)+'<small>%/h</small>':'—')+'</div></div>'
+    + '<div class="kv"><div class="k">~finish</div><div class="v">'+(pr.finishAt?abs(pr.finishAt):'—')+'</div></div></div>'
+    + '</div></div>'
+    + foot([
+        ['RESET', pr.resetAt?'<span data-count="'+pr.resetAt+'">'+durShort(pr.resetAt-Date.now())+'</span>':'—'],
+        [esc(String(p.label||'').replace(/^Codex\s*\(?/i,'').replace(/\)$/,'').toUpperCase()||'PLAN'), new Date(latest.generatedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})]
+      ],'codex') + '</div>';
+}
+
+function orCard(p){
+  if(p.status!=='ok') return errCard('openrouter','OPENROUTER',p);
+  const usedPct = (p.totalCredits&&p.totalUsage!=null)?(p.totalUsage/p.totalCredits*100):null;
+  const left = usedPct!=null?100-usedPct:null;
+  return '<div class="card"><div class="chead"><span class="ctitle">OPENROUTER</span></div>'
+    + '<div class="csub '+sevClass(left==null?100:left)+'">credit balance</div>'
+    + '<div class="body">'+ring(left)+'<div class="bars">'
+    + '<div class="brow"><div class="r1"><span class="bname">'+money(p.remaining)+' left</span>'
+    + '<span class="bpct" style="color:'+colorFor(left==null?100:left)+'">'+(left!=null?Math.round(left)+'%':'—')+'<small>LEFT</small></span></div>'
+    + '<div class="btime">of '+money(p.totalCredits)+' credits</div>'
+    + '<div class="track"><div class="fill" style="width:'+(left||0)+'%;background:'+colorFor(left==null?100:left)+'"></div><div class="knob" style="left:'+(left||0)+'%;border-color:'+colorFor(left==null?100:left)+'"></div></div></div>'
+    + '<div class="kvrow"><div class="kv"><div class="k">spent</div><div class="v">'+money(p.totalUsage)+'</div></div>'
+    + '<div class="kv"><div class="k">~burn</div><div class="v">'+(p.spendPerHour!=null?money(p.spendPerHour)+'<small>/h</small>':'—')+'</div></div>'
+    + '<div class="kv"><div class="k">~empty</div><div class="v">'+(p.finishAt?abs(p.finishAt):'—')+'</div></div></div>'
+    + '</div></div>'
+    + foot([['API','PAY-AS-YOU-GO']],'openrouter') + '</div>';
+}
+
+function grokCard(p){
+  if(p.status!=='ok') return p.status==='pending'?pendCard('grok','GROK'):errCard('grok','GROK',p);
+  const wk = p.weekly, mo = p.monthly, u = p.usage||{};
+  const wkLeft = wk ? wk.remainingPct : null;
+  const gsub = p.stale && p.sampledAt
+    ? '<div class="csub crit">⚠ stale ('+new Date(p.sampledAt).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})+') — '
+      + (p.authFailed ? 'token rejected, run <b>grok</b> to sign in again' : 'waiting for token refresh')+'</div>'
+    : '<div class="csub '+sevClass(wkLeft==null?100:wkLeft)+'">weekly plan quota · '+(wk?Math.round(wk.usedPct)+'% used':'—')+'</div>';
+  function pbar(name, usedPct, detail){
+    if(usedPct==null) return '';
+    const left = Math.max(0,100-usedPct);
+    const col = colorFor(left);
+    return '<div class="brow"><div class="r1"><span class="bname">'+name+'</span>'
+      + '<span class="bpct" style="color:'+col+'">'+Math.round(left)+'%<small>LEFT</small></span></div>'
+      + '<div class="btime">'+detail+'</div>'
+      + '<div class="track"><div class="fill" style="width:'+left+'%;background:'+col+'"></div><div class="knob" style="left:'+left+'%;border-color:'+col+'"></div></div></div>';
+  }
+  return '<div class="card"><div class="chead"><span class="ctitle">GROK QUOTA</span></div>'
+    + gsub
+    + '<div class="body">'+ring(wkLeft)+'<div class="bars">'
+    + (wk?pbar('weekly credits', wk.usedPct, 'resets '+abs(wk.resetAt)+' · <span data-count="'+(wk.resetAt||'')+'">'+durShort((wk.resetAt||0)-Date.now())+'</span>'):'')
+    + (mo?pbar('monthly', mo.usedPct, fmtNum(mo.used)+' of '+fmtNum(mo.limit)+' credits used'):'')
+    + '<div class="kvrow" style="margin-top:2px">'
+    + '<div class="kv"><div class="k">tok 5h</div><div class="v">'+fmtNum(u.windowTokens)+'</div></div>'
+    + '<div class="kv"><div class="k">tok 7d</div><div class="v">'+fmtNum(u.weekTokens)+'</div></div>'
+    + '<div class="kv"><div class="k">~burn</div><div class="v">'+(u.burnPerHour!=null?fmtNum(u.burnPerHour)+'<small>/h</small>':'—')+'</div></div>'
+    + '</div>'
+    + '</div></div>'
+    + foot([
+        ['SAMPLED', p.sampledAt?new Date(p.sampledAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'—'],
+        ['SOURCE','SUPERGROK BILLING']
+      ],'grok') + '</div>';
+}
+function errCard(id, name, p){
+  const msg = p.status==='pending'?'pending connection':p.status==='no-data'?'no local data':p.status==='no-key'?'no api key':p.status==='no-token'?'no oauth token':p.status==='token-expired'?'token expired — open claude code':'error '+esc(p.message||'');
+  return '<div class="card dim"><div class="chead"><span class="ctitle">'+name+' QUOTA</span></div>'
+    + '<div class="csub" style="color:var(--dim)">unavailable</div>'
+    + '<div class="body">'+ring(null)+'<div class="pend"><span class="lbl">'+msg+'</span></div></div>'
+    + foot([['STATUS','ERROR']], id)+'</div>';
+}
+
+// ---------- detected harnesses ----------
+let detectData = null;
+
+function detectCard(){
+  if(!detectData || detectData.error) return '';
+  const rows = (detectData.detected||[]).map(h=>{
+    const state = !h.captureReady ? 'crit' : (h.homePath && !h.hasData ? 'warn' : '');
+    const how = h.capabilities.quota==='official' ? 'official api + logs'
+      : h.capabilities.tokens==='proxy' ? (h.proxyWiring?'via proxy':'proxy off')
+      : h.capabilities.tokens==='server-api' ? 'server api needed'
+      : 'not capturable';
+    return '<tr><td>'+esc(h.label)+'</td>'
+      + '<td class="mut">'+(h.binPath?'on PATH':'—')+'</td>'
+      + '<td class="mut">'+(h.homePath?esc(h.homeSource):'—')+'</td>'
+      + '<td class="'+(state==='crit'?'':'mut')+'" style="'+(state==='crit'?'color:var(--red)':state==='warn'?'color:var(--gold)':'')+'">'+how+'</td>'
+      + '<td class="mut">'+(h.hasData?'yes':'—')+'</td></tr>';
+  }).join('');
+  const missing = (detectData.missing||[]).map(m=>esc(m.label)).join(', ');
+  return '<div class="card tokcard"><div class="chead"><span class="ctitle">DETECTED HARNESSES</span>'
+    + '<span style="font-size:9px;letter-spacing:1.6px;color:var(--dim)">'+(detectData.detected||[]).length+' FOUND · '+esc(detectData.platform||'')+'</span></div>'
+    + '<div class="csub">scanned automatically — no per-machine configuration</div>'
+    + '<div style="overflow-x:auto"><table class="toktbl"><thead><tr>'
+    + '<th>harness</th><th>binary</th><th>data dir</th><th>capture</th><th>has logs</th>'
+    + '</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + (missing?'<div class="toknote">NOT INSTALLED: '+missing+'</div>':'')
+    + '</div>';
+}
+
+async function pollDetect(){
+  try{
+    const r = await fetch('/api/detect', {cache:'no-store'});
+    detectData = await r.json();
+    document.getElementById('detectwrap').innerHTML = detectCard();
+  }catch(e){ /* optional section */ }
+}
+
+// ---------- harnesses (capture proxy) ----------
+// Rendered entirely from the API response: any harness that reports usage
+// appears here without a code change, which is what makes onboarding a new
+// tool a configuration-only step.
+let harnData = null;
+
+function harnCard(){
+  if(!harnData || harnData.error) return '';
+  const totals = harnData.totals || {};
+  const names = Object.keys(totals).sort((a,b)=>(totals[b].est||0)-(totals[a].est||0));
+  const grand = names.reduce((s,n)=>s+(totals[n].est||0),0);
+
+  let body;
+  if(!harnData.proxyEnabled){
+    body = '<div class="setup"><span class="k">capture proxy disabled</span>'
+      + 'Set <code>proxy.enabled = true</code> in config.json to record model + token usage '
+      + 'from bring-your-own-key harnesses.</div>';
+  } else if(!names.length){
+    body = '<div class="setup"><span class="k">no traffic captured yet — point a harness here</span>'
+      + '<code>'+esc(harnData.proxyEndpoint||'')+'</code>'
+      + '<div style="color:var(--mut);font-size:10px;margin-top:8px">'
+      + 'e.g. <code style="color:var(--mut)">OPENAI_BASE_URL=http://127.0.0.1:8898/opencode/openrouter/v1</code>'
+      + '<br>The model actually served and its exact token usage are read off the wire — '
+      + 'no log parsing, correct even when the harness switches model mid-session.</div></div>';
+  } else {
+    body = '<div class="hgrid">' + names.map(n=>{
+      const h = totals[n];
+      const models = Object.keys(h.models||{}).sort((a,b)=>(h.models[b].calls||0)-(h.models[a].calls||0));
+      return '<div class="hcell">'
+        + '<div class="hname">'+esc(n)+'</div>'
+        + '<div class="hcost">'+estMoney(h.est)+'</div>'
+        + '<div class="hmeta">'+fmtNum(h.calls)+' calls · '+fmtNum(h.tokens.in)+' in · '+fmtNum(h.tokens.out)+' out'
+        + (h.tokens.cache_read?' · '+fmtNum(h.tokens.cache_read)+' cached':'')+'</div>'
+        + '<div class="hmodels">'+models.slice(0,4).map(m=>esc(m)+' ('+h.models[m].calls+')').join('<br>')
+        + (models.length>4?'<br>+'+(models.length-4)+' more':'')+'</div>'
+        + '</div>';
+    }).join('') + '</div>';
+  }
+
+  const unpriced = harnData.unpriced && harnData.unpriced.length
+    ? ' · UNPRICED (excluded): '+harnData.unpriced.map(esc).join(', ') : '';
+  return '<div class="card tokcard"><div class="chead"><span class="ctitle">HARNESSES · CAPTURE PROXY</span>'
+    + '<span class="k" style="font-size:9px;letter-spacing:1.6px;color:var(--dim)">'
+    + (harnData.proxyEnabled?'LISTENING':'OFF')+' · '+fmtNum(harnData.eventCount||0)+' EVENTS</span></div>'
+    + '<div class="csub">model + tokens read off the wire'+(grand?' · '+estMoney(grand)+' total':'')+'</div>'
+    + body
+    + '<div class="toknote">Captures any harness that speaks an OpenAI/Anthropic/Gemini-compatible API. '
+    + 'Model shown is the one the provider actually served, not the one configured'+unpriced+'</div>'
+    + '</div>';
+}
+
+async function pollHarnesses(){
+  try{
+    const r = await fetch('/api/harnesses', {cache:'no-store'});
+    harnData = await r.json();
+    document.getElementById('harnwrap').innerHTML = harnCard();
+  }catch(e){ /* panel keeps working without the proxy section */ }
+}
+
+// ---------- token usage table ----------
+let tokData = null, tokMode = 'days';
+// A true zero renders as $0.00; only unknown/absent values show a dash, so the
+// two cases are never confused in the tables.
+function estMoney(v){ if(v==null||isNaN(v)) return '—'; if(v===0) return '$0.00'; if(v<0.005) return '<$0.01'; return '$'+v.toFixed(2); }
+function tokCard(){
+  const rows = tokData ? (tokData[tokMode]||[]) : [];
+  const maxRows = tokMode==='days'?31:tokMode==='months'?12:10;
+  const body = rows.slice(0,maxRows).map(r=>{
+    const cin = r.claude.in + (r.claude.cacheWrite||0);
+    const total = cin+r.claude.out+r.codex.in+r.codex.out+r.grok.total;
+    const rowEst = (r.claude.est||0)+(r.codex.est||0)+(r.grok.est||0)+(r.openrouter.spend||0);
+    return '<tr><td>'+r.key+'</td>'
+      + '<td>'+fmtNum(cin)+'</td><td>'+fmtNum(r.claude.out)+'</td><td class="mut">'+fmtNum(r.claude.cacheRead)+'</td><td class="mut">'+estMoney(r.claude.est)+'</td>'
+      + '<td>'+fmtNum(r.codex.in)+'</td><td>'+fmtNum(r.codex.out)+'</td><td class="mut">'+estMoney(r.codex.est)+'</td>'
+      + '<td>'+fmtNum(r.grok.total)+'</td><td class="mut">'+estMoney(r.grok.est)+'</td>'
+      + '<td>'+(r.openrouter.spend?money(r.openrouter.spend):'—')+'</td>'
+      + '<td class="tot">'+fmtNum(total)+'</td><td class="tot">'+estMoney(rowEst)+'</td></tr>';
+  }).join('');
+  const T = tokData && tokData.totals;
+  const sub = (flat)=> flat ? '<div style="font-size:9px;color:var(--dim);margin-top:1px">sticker '+estMoney(flat)+'</div>' : '';
+  const strip = T ? '<div class="kvrow" style="margin:2px 0 4px">'
+    + '<div class="kv"><div class="k">claude</div><div class="v">'+estMoney(T.claude.est)+'</div>'+sub(T.claude.estFlat)+'</div>'
+    + '<div class="kv"><div class="k">codex</div><div class="v">'+estMoney(T.codex.est)+'</div>'+sub(T.codex.estFlat)+'</div>'
+    + '<div class="kv"><div class="k">grok</div><div class="v">'+estMoney(T.grok.est)+'</div></div>'
+    + '<div class="kv"><div class="k">openrouter actual</div><div class="v">'+estMoney(T.openrouter.spend)+'</div></div>'
+    + '<div class="kv"><div class="k">if run on openrouter</div><div class="v" style="color:var(--mint)">≈'+estMoney(T.grand)+'</div>'+sub(T.grandFlat)+'</div>'
+    + '</div>' : '';
+  const unpriced = tokData && tokData.unpriced && tokData.unpriced.length
+    ? ' · UNPRICED (excluded): '+tokData.unpriced.map(esc).join(', ') : '';
+  // A total that omits a log file must say so — silently short numbers are the
+  // one failure this tool cannot afford.
+  const skipped = tokData && tokData.skipped && tokData.skipped.length
+    ? '<div class="toknote" style="color:var(--red)">⚠ '+tokData.skipped.length
+      + ' LOG FILE'+(tokData.skipped.length>1?'S':'')+' TOO LARGE TO PARSE — TOTALS BELOW ARE INCOMPLETE: '
+      + tokData.skipped.map(esc).join(', ')+'</div>'
+    : '';
+  const asOf = tokData && tokData.pricingAsOf
+    ? ' · prices as of '+new Date(tokData.pricingAsOf).toLocaleDateString() : ' · NO PRICING DATA';
+  return '<div class="card tokcard"><div class="chead"><span class="ctitle">TOKEN USAGE + EST SPEND</span>'
+    + '<span class="toktabs">'
+    + '<a data-tok="days" class="'+(tokMode==='days'?'on':'')+'">D</a>'
+    + '<a data-tok="months" class="'+(tokMode==='months'?'on':'')+'">M</a>'
+    + '<a data-tok="years" class="'+(tokMode==='years'?'on':'')+'">Y</a>'
+    + '</span></div>'
+    + '<div class="csub">true counts · $ = what openrouter would bill for the same work</div>'
+    + skipped
+    + strip
+    + '<div style="overflow-x:auto"><table class="toktbl"><thead><tr>'
+    + '<th>'+(tokMode==='days'?'date':tokMode==='months'?'month':'year')+'</th>'
+    + '<th>claude in</th><th>claude out</th><th>cache read</th><th>claude $</th>'
+    + '<th>codex in</th><th>codex out</th><th>codex $</th>'
+    + '<th>grok tok</th><th>grok $</th><th>or $</th><th>total tok</th><th>total $</th>'
+    + '</tr></thead><tbody>'+(body||'<tr><td colspan="13" class="mut">no data yet</td></tr>')+'</tbody></table></div>'
+    + '<div class="toknote">$ = WHAT OPENROUTER WOULD BILL for the same tokens — cached input charged at each model\'s cache-read rate (that is how OpenRouter bills it), fresh input and output at full rate · "STICKER" = same tokens with every input token at the full prompt rate, no cache discount · CODEX priced at '+esc((tokData&&tokData.codexPriceModel)||'gpt-5.6-sol')+' rates for all sessions · CODEX counts THIS MACHINE\'S sessions only (cloud/IDE usage not logged locally) · GROK $ blended 80/20 in/out (no split in logs) · OR $ = actual credits spent · excludes OpenRouter\'s credit top-up fee (~5.5%) · dates use this machine\'s local timezone'+asOf+unpriced+'</div>'
+    + '</div>';
+}
+function renderTok(){
+  document.getElementById('tokwrap').innerHTML = tokCard();
+}
+async function pollTokens(){
+  try{
+    const r = await fetch('/api/tokens', {cache:'no-store'});
+    tokData = await r.json();
+    renderTok();
+  }catch(e){}
+}
+
+// ---------- render / polling ----------
+let lastSig = null;
+function render(data){
+  latest = data;
+  const P = data.providers;
+  const sig = JSON.stringify(P);
+  if(sig !== lastSig){
+    lastSig = sig;
+    document.getElementById('grid').innerHTML =
+        claudeCard(P.claude||{status:'no-data'})
+      + codexCard(P.codex||{status:'no-data'})
+      + orCard(P.openrouter||{status:'no-data'})
+      + grokCard(P.grok||{status:'pending'})
+      + (P.kimi&&P.kimi.status!=='pending'?errCard('kimi','KIMI',P.kimi):pendCard('kimi','KIMI'))
+      + (P.gemini&&P.gemini.status!=='pending'?errCard('gemini','GEMINI',P.gemini):pendCard('gemini','GEMINI'));
+  }
+  setUpd('UPDATED ' + new Date(data.generatedAt).toLocaleTimeString(), false);
+}
+
+function tick(){
+  document.querySelectorAll('[data-count]').forEach(el=>{
+    const ts = Number(el.getAttribute('data-count'));
+    if(ts) el.textContent = durShort(ts - Date.now());
+  });
+}
+
+// --- freshness watchdog -------------------------------------------------
+// A page left open across a server restart used to sit there showing old
+// numbers forever. Now it tracks its own last successful poll, says so loudly,
+// and reloads itself if it can't recover (or if the server ships new code).
+let lastGoodPoll = Date.now();
+let failStreak = 0;
+let myBuildId = null;
+let reloading = false;
+
+function setUpd(text, bad){
+  const el = document.getElementById('upd');
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = bad ? 'var(--red)' : '';
+}
+
+async function poll(force){
+  try{
+    const r = await fetch('/api/data'+(force?'?force=1':''), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    if(force) lastSig = null;
+    // server restarted with new code → reload so the page isn't running stale JS
+    if(data.buildId){
+      if(myBuildId && data.buildId !== myBuildId && !reloading){
+        reloading = true;
+        setUpd('UPDATING…', false);
+        setTimeout(()=>location.reload(true), 300);
+        return;
+      }
+      myBuildId = data.buildId;
+    }
+    render(data);
+    lastGoodPoll = Date.now();
+    failStreak = 0;
+  }catch(e){
+    failStreak++;
+    const age = Math.round((Date.now()-lastGoodPoll)/1000);
+    setUpd('⚠ NO CONNECTION — LAST DATA '+age+'S AGO', true);
+    // Deliberately do NOT reload here: with the server down a reload lands on a
+    // browser error page with no JS, which can never recover. Keep polling
+    // instead — when the server returns, the buildId check reloads if needed.
+  }
+}
+
+// If polls silently stop (window suspended, timers throttled, tab restored from
+// sleep), catch it here and refresh immediately.
+function freshnessCheck(){
+  const age = Date.now() - lastGoodPoll;
+  if(age > 45000 && !reloading){
+    setUpd('⚠ STALE '+Math.round(age/1000)+'S — RECONNECTING', true);
+    poll();
+  }
+}
+// Poll the moment the window is looked at again.
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) poll(); });
+window.addEventListener('focus', ()=>poll());
+window.addEventListener('online', ()=>poll());
+
+// delegated clicks (survive re-renders)
+document.addEventListener('click', async (e)=>{
+  const t = e.target;
+  if(t.hasAttribute('data-tok')){ tokMode = t.getAttribute('data-tok'); renderTok(); return; }
+  if(t.id==='refall' || t.hasAttribute('data-refresh')){ poll(true); pollTokens(); pollHarnesses(); return; }
+});
+
+poll();
+pollTokens();
+pollHarnesses();
+pollDetect();
+setInterval(pollHarnesses, 30000);
+setInterval(pollDetect, 300000);
+setInterval(poll, 10000);
+setInterval(pollTokens, 300000);
+setInterval(tick, 1000);
+setInterval(freshnessCheck, 15000);
+</script>
+</body>
+</html>

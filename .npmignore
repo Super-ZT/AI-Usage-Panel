@@ -1,0 +1,16 @@
+server/collector-data/
+collector-data/
+**/access-key
+**/*.db
+**/*.sqlite*
+**/*.log
+**/sessions/
+**/quarantine/
+.env
+.env.*
+graphify-out/
+**/graphify-out/
+backups/
+ops/compose.env
+ops/secrets.env
+ops/postgres-password

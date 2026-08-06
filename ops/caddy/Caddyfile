@@ -1,0 +1,79 @@
+{
+	admin off
+	servers {
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+		timeouts {
+			read_body 15s
+			read_header 10s
+			write 30s
+			idle 2m
+		}
+		max_header_size 32KB
+	}
+}
+
+(app_proxy) {
+	reverse_proxy app:8900 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+			read_timeout 30s
+			write_timeout 30s
+		}
+	}
+}
+
+{$PUBLIC_DOMAIN} {
+	tls {$CADDY_TLS_MODE}
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	@login path /api/v1/manager/login
+	handle @login {
+		request_body {
+			max_size 16KB
+		}
+		import app_proxy
+	}
+
+	@enroll path /api/v1/enroll
+	handle @enroll {
+		request_body {
+			max_size 32KB
+		}
+		import app_proxy
+	}
+
+	@upload path /api/v1/events
+	handle @upload {
+		request_body {
+			max_size 1MB
+		}
+		import app_proxy
+	}
+
+	@manager_write path /api/v1/manager/logout /api/v1/manager/enrollment-codes /api/v1/manager/devices/*/revoke
+	handle @manager_write {
+		request_body {
+			max_size 8KB
+		}
+		import app_proxy
+	}
+
+	handle {
+		request_body {
+			max_size 64KB
+		}
+		import app_proxy
+	}
+}
