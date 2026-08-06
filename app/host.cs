@@ -63,7 +63,8 @@ static class Program
         var form = new Form();
         form.Text = "USAGE_PANEL";
         form.BackColor = Color.FromArgb(10, 11, 11);
-        form.ClientSize = new Size(1520, 940);
+        Rectangle working = Screen.PrimaryScreen.WorkingArea;
+        form.ClientSize = new Size(Math.Min(1520, working.Width), Math.Min(940, working.Height));
         form.StartPosition = FormStartPosition.CenterScreen;
         string ico = Path.Combine(baseDir, "usage-panel.ico");
         if (File.Exists(ico)) form.Icon = new Icon(ico);

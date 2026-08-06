@@ -102,7 +102,12 @@ function usage(id, tokens) {
   const createOutsider = spawnSync(process.execPath, [
     path.join(__dirname, '..', 'server', 'admin.js'), 'create-user', '--email', 'outsider@example.test'
   ], { input: 'outsider account password\n', encoding: 'utf8', env: process.env, timeout: 10000 });
-  if (createOutsider.status !== 0) throw new Error('create-user command failed: ' + createOutsider.stderr.trim());
+  if (createOutsider.status !== 0) {
+    const detail = typeof createOutsider.stderr === 'string' && createOutsider.stderr.trim()
+      ? createOutsider.stderr.trim()
+      : (createOutsider.error && createOutsider.error.message) || 'no process error output';
+    throw new Error('create-user command failed: ' + detail);
+  }
   const companyA = await repository.bootstrapCompany(pool, {
     slug: 'accounts-a', name: 'Accounts A', email: 'owner-a@example.test', password: 'owner a account password'
   });
@@ -125,7 +130,7 @@ function usage(id, tokens) {
   let managerA, managerB, personalOne, personalTwo, teamA, teamB;
 
   await test('forward migration creates users, memberships, optional device scope and user sessions', async () => {
-    assert.strictEqual(migrations.at(-1), '006_user_accounts.sql');
+    assert.strictEqual(migrations.at(-1), '007_pricing_catalogue_index.sql');
     const columns = await pool.query(
       `SELECT table_name,column_name,is_nullable FROM information_schema.columns
         WHERE table_schema='public' AND table_name IN ('devices','usage_events','users','company_memberships','user_sessions')`

@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const repository = require('./repository');
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function arg(name) {
   const index = process.argv.indexOf('--' + name);
@@ -25,13 +26,16 @@ function containsSensitiveFields(raw) {
 }
 
 async function importFlat(pool, options) {
-  const company = await pool.query(
-    `SELECT c.id, m.user_id
-       FROM companies c JOIN managers m ON m.company_id=c.id
-      WHERE c.id=$1 ORDER BY m.created_at, m.id LIMIT 1`, [options.companyId]
-  );
+  if (!options || !UUID_PATTERN.test(String(options.companyId || ''))) {
+    throw new Error('companyId must be a UUID');
+  }
+  const company = await pool.query('SELECT id FROM companies WHERE id=$1', [options.companyId]);
   if (!company.rowCount) throw new Error('company does not exist');
-  const ownerUserId = company.rows[0].user_id;
+  const owner = await pool.query(
+    'SELECT user_id FROM managers WHERE company_id=$1 ORDER BY created_at,id LIMIT 1', [options.companyId]
+  );
+  if (!owner.rowCount) throw new Error('company has no manager owner');
+  const ownerUserId = owner.rows[0].user_id;
   const eventsDir = path.join(path.resolve(options.dataDir), 'events');
   const files = fs.readdirSync(eventsDir).filter((name) => name.endsWith('.jsonl')).sort();
   const rawEvents = [];
@@ -49,7 +53,11 @@ async function importFlat(pool, options) {
     await client.query('BEGIN');
     const devices = new Map();
     for (const raw of rawEvents) {
+      if (raw.device_id != null && !['string', 'number'].includes(typeof raw.device_id)) {
+        throw new Error('flat-file device_id must be a string or number');
+      }
       const oldId = String(raw.device_id || 'historical-device');
+      if (!oldId.trim() || oldId.length > 512) throw new Error('flat-file device_id is invalid');
       if (!devices.has(oldId)) {
         const id = historicalId(options.companyId, oldId);
         await client.query(

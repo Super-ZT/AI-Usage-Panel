@@ -95,22 +95,26 @@ function readJSON(req, limit) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    let failed = false;
+    let settled = false;
+    const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
     req.on('data', (chunk) => {
-      if (failed) return;
+      if (settled) return;
       size += chunk.length;
       if (size > (limit || MAX_BODY_BYTES)) {
-        failed = true;
-        reject(Object.assign(new Error('payload too large'), { statusCode: 413 }));
+        finish(reject, Object.assign(new Error('payload too large'), { statusCode: 413 }));
         req.resume();
       } else chunks.push(chunk);
     });
     req.on('end', () => {
-      if (failed) return;
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-      catch (_) { reject(Object.assign(new Error('invalid JSON'), { statusCode: 400 })); }
+      if (settled) return;
+      try { finish(resolve, JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch (_) { finish(reject, Object.assign(new Error('invalid JSON'), { statusCode: 400 })); }
     });
-    req.on('error', reject);
+    req.on('aborted', () => finish(reject, Object.assign(new Error('request aborted'), { statusCode: 400 })));
+    req.on('close', () => {
+      if (!req.complete) finish(reject, Object.assign(new Error('request closed before completion'), { statusCode: 400 }));
+    });
+    req.on('error', (err) => finish(reject, err));
   });
 }
 
@@ -241,6 +245,9 @@ function createCollector(options) {
       }
 
       if (req.method === 'POST' && url.pathname === '/api/v1/events') {
+        if (!(await allowed(req, 'device-events-source', 120, 12000))) {
+          return send(res, 429, { error: 'too many requests' });
+        }
         const token = bearer(req);
         if (token && token.startsWith('upm_')) return send(res, 403, { error: 'device credential required' });
         const device = await repository.deviceByToken(pool, token);
@@ -259,6 +266,9 @@ function createCollector(options) {
       }
 
       if (url.pathname.startsWith('/api/v1/account/')) {
+        if (!(await allowed(req, 'account-auth-source', 1000, 50000))) {
+          return send(res, 429, { error: 'too many requests' });
+        }
         const token = userToken(req);
         if (token && (token.startsWith('upd_') || token.startsWith('upm_'))) {
           return send(res, 403, { error: 'user session required' });
@@ -332,6 +342,9 @@ function createCollector(options) {
         return send(res, 404, { error: 'not found' });
       }
 
+      if (!(await allowed(req, 'manager-auth-source', 300, 12000))) {
+        return send(res, 429, { error: 'too many requests' });
+      }
       const token = managerToken(req);
       if (token && token.startsWith('upd_')) return send(res, 403, { error: 'manager session required' });
       const manager = await repository.managerByToken(pool, token);

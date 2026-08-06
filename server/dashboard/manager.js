@@ -223,7 +223,8 @@
     state.csrf = session.csrfToken;
     $('manager-label').textContent = `${session.manager.companyName} · ${session.manager.email}`;
     $('login-view').hidden = true; $('dashboard-view').hidden = false;
-    await loadFleet();
+    try { await loadFleet(); }
+    catch (_) { setStatus('Usage could not be loaded. Try again.'); }
   }
 
   async function preloginCsrf() {
@@ -233,13 +234,21 @@
 
   $('login-form').addEventListener('submit', async (event) => {
     event.preventDefault(); $('login-error').textContent = '';
+    let session;
     try {
       await preloginCsrf();
-      const session = await api('/api/v1/manager/login', { method: 'POST', body: {
+      session = await api('/api/v1/manager/login', { method: 'POST', body: {
         email: $('email').value, password: $('password').value
       } });
-      $('password').value = ''; await showDashboard(session);
-    } catch (_) { $('password').value = ''; $('login-error').textContent = 'Email or password is incorrect.'; }
+    } catch (err) {
+      $('password').value = '';
+      $('login-error').textContent = err && err.status === 401
+        ? 'Email or password is incorrect.'
+        : 'Sign in could not be completed. Try again.';
+      return;
+    }
+    $('password').value = '';
+    await showDashboard(session);
   });
   $('filters').addEventListener('submit', async (event) => {
     event.preventDefault(); try { await loadFleet(); } catch (_) { setStatus('Usage could not be loaded. Try again.'); }

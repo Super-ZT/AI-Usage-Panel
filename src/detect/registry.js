@@ -15,7 +15,7 @@
  *   envHome       environment variable that overrides the home directory
  *   marker        file that must exist inside a home directory to confirm it
  *   quota         how subscription quota is obtained: 'official' | null
- *   tokens        where token counts come from: 'logs' | 'proxy' | 'server-api'
+ *   tokens        where token counts come from: 'logs' | 'proxy' | 'server-api' | 'none'
  *   byok          true when the tool calls providers with the user's own key,
  *                 in which case the capture proxy is the source of truth
  *   baseUrlEnv    environment variables that redirect it at the proxy

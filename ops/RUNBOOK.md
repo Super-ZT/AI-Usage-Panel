@@ -110,6 +110,10 @@ The one-shot backup and restore containers run as root with every Linux capabili
 
 Restore only to a new isolated empty database:
 
+For an age-encrypted backup, set `BACKUP_IDENTITY_FILE` in `compose.env` to the
+host's owner-only identity file. Compose mounts it read-only at
+`/run/secrets/backup-identity`; the restore rejects any other container path.
+
 ```bash
 RESTORE_FILE=usage-panel-YYYYMMDDTHHMMSSZ.dump \
   docker compose -f ops/compose.yaml --profile restore run --rm restore
@@ -119,7 +123,7 @@ After restore, compare company, manager, device and event counts; token/cost agg
 
 ## Retention
 
-The application runs operational retention at start and every six hours. Run it manually with:
+The application runs operational retention at start and every ten minutes. Run it manually with:
 
 ```bash
 docker compose -f ops/compose.yaml --profile operations run --rm retention

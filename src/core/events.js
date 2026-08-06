@@ -222,15 +222,18 @@ let flushChain = Promise.resolve();
 /** @type {((err: Error) => void)|null} */
 let onWriteError = null;
 
+function scheduleFlush() {
+  if (flushTimer || !pending.size) return;
+  flushTimer = setTimeout(() => { flushTimer = null; flush(); }, 250);
+  if (flushTimer.unref) flushTimer.unref();
+}
+
 /** @param {string} day @param {string} line */
 function enqueue(day, line) {
   const lines = pending.get(day) || [];
   lines.push(line);
   pending.set(day, lines);
-  if (!flushTimer) {
-    flushTimer = setTimeout(() => { flushTimer = null; flush(); }, 250);
-    if (flushTimer.unref) flushTimer.unref(); // never hold the process open
-  }
+  scheduleFlush();
 }
 
 /**
@@ -252,10 +255,10 @@ function flush() {
       try { ensureDir(eventsDir()); } catch (_) { /* handled by the append error */ }
       fs.appendFile(dayFile(day), lines.join(''), 'utf8', (err) => {
         if (err) {
-          // Re-queue so a transient failure (disk full, lock) is retried, but
-          // drop the id from the seen set so the retry is not self-rejected.
+          // Re-queue so a transient failure (disk full, lock) is retried.
           const back = pending.get(day) || [];
           pending.set(day, lines.concat(back));
+          scheduleFlush();
           if (onWriteError) { try { onWriteError(err); } catch (_) { /* ignore */ } }
         }
         next();

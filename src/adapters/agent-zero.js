@@ -15,6 +15,7 @@
 
 const http = require('http');
 const https = require('https');
+const MAX_RESPONSE_BYTES = 512 * 1024;
 
 /**
  * GET JSON from the Agent Zero instance.
@@ -26,8 +27,10 @@ const https = require('https');
  */
 function getJSON(base, pathname, token, timeoutMs) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
     let url;
-    try { url = new URL(pathname, base); } catch (_) { return resolve({ status: 0, json: null }); }
+    try { url = new URL(pathname, base); } catch (_) { return finish({ status: 0, json: null }); }
     const transport = url.protocol === 'https:' ? https : http;
     /** @type {Record<string,string>} */
     const headers = { accept: 'application/json' };
@@ -41,16 +44,25 @@ function getJSON(base, pathname, token, timeoutMs) {
       headers,
       timeout: timeoutMs || 4000
     }, (res) => {
-      let raw = '';
-      res.on('data', (c) => { if (raw.length < 512 * 1024) raw += c; });
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_RESPONSE_BYTES) return res.destroy(new Error('response too large'));
+        chunks.push(c);
+      });
+      res.on('error', () => finish({ status: 0, json: null }));
+      res.on('aborted', () => finish({ status: 0, json: null }));
+      res.on('close', () => { if (!res.complete) finish({ status: 0, json: null }); });
       res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
         let json = null;
         try { json = JSON.parse(raw); } catch (_) { /* not JSON */ }
-        resolve({ status: res.statusCode || 0, json });
+        finish({ status: res.statusCode || 0, json });
       });
     });
-    req.on('error', () => resolve({ status: 0, json: null }));
-    req.on('timeout', () => { req.destroy(); resolve({ status: 0, json: null }); });
+    req.on('error', () => finish({ status: 0, json: null }));
+    req.on('timeout', () => { req.destroy(); finish({ status: 0, json: null }); });
     req.end();
   });
 }
@@ -72,8 +84,10 @@ function pickNumber(obj, paths) {
       else { ok = false; break; }
     }
     if (ok) {
+      if (!['number', 'string'].includes(typeof node)) continue;
+      if (typeof node === 'string' && !node.trim()) continue;
       const n = Number(node);
-      if (Number.isFinite(n)) return n;
+      if (Number.isFinite(n) && n >= 0) return n;
     }
   }
   return null;

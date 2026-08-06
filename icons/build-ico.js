@@ -4,7 +4,13 @@ const fs = require('fs');
 const path = require('path');
 const sizes = [256, 128, 64, 48, 32, 16];
 const dir = __dirname;
-const pngs = sizes.map((s) => ({ s, buf: fs.readFileSync(path.join(dir, 'logo-' + s + '.png')) }));
+const pngs = sizes.map((s) => {
+  const filename = path.join(dir, 'logo-' + s + '.png');
+  if (!fs.existsSync(filename)) {
+    throw new Error('Missing ' + path.basename(filename) + '; run `node icons/generate-icons.js` first.');
+  }
+  return { s, buf: fs.readFileSync(filename) };
+});
 
 const count = pngs.length;
 const header = Buffer.alloc(6);

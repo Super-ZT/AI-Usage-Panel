@@ -114,7 +114,8 @@ async function createEnrolledDevice(port, managerToken, label) {
 
   await test('exact ordered migrations create the durable schema', async () => {
     assert.deepStrictEqual(migrationNames, ['001_company_security.sql', '002_indexes.sql', '003_manager_dashboard.sql',
-      '004_operations_readiness.sql', '005_operations_constraints.sql', '006_user_accounts.sql']);
+      '004_operations_readiness.sql', '005_operations_constraints.sql', '006_user_accounts.sql',
+      '007_pricing_catalogue_index.sql']);
     const tables = await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public'");
     const names = tables.rows.map((row) => row.tablename);
     for (const name of ['companies','users','company_memberships','managers','manager_sessions','user_sessions',
@@ -135,6 +136,8 @@ async function createEnrolledDevice(port, managerToken, label) {
     assert.throws(() => sync.validateEndpoint('http://example.com/api/v1/events', false), /plaintext/);
     assert.ok(sync.validateEndpoint('http://127.0.0.1:8900/api/v1/events', false));
     assert.ok(sync.validateEndpoint('https://usage.example/api/v1/events', false));
+    assert.throws(() => sync.validateEndpoint('https://usage.example?redirect=elsewhere', false), /query string/);
+    assert.throws(() => sync.validateEndpoint('https://usage.example/#fragment', false), /fragment/);
   });
 
   await test('wrong password returns one generic authentication failure', async () => {

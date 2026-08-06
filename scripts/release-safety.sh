@@ -20,8 +20,19 @@ trap 'exit 143' TERM
 
 npm test
 npm run accuracy:codex
-timeout 30 npm audit --audit-level=low
-timeout 30 npm audit --prefix server --omit=dev --audit-level=low
+run_audit() {
+  set +e
+  timeout 30 "$@"
+  audit_status=$?
+  set -e
+  if [ "$audit_status" -eq 124 ]; then
+    echo "dependency audit timed out after 30 seconds" >&2
+    return 1
+  fi
+  return "$audit_status"
+}
+run_audit npm audit --audit-level=low
+run_audit npm audit --prefix server --omit=dev --audit-level=low
 
 mkdir -p "$release_state/archive" "$release_state/extracted"
 npm_config_cache="$release_state/npm-cache" npm pack --json --ignore-scripts \

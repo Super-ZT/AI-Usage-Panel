@@ -163,7 +163,8 @@ function priceTokens(model, tokens, options) {
   const missing = Array.isArray(t.missing) ? t.missing.filter((name) => typeof name === 'string') : [];
   const writeSplit = splitCacheWriteTokens(t);
 
-  if (!found || !Number.isFinite(found.price.prompt) || !Number.isFinite(found.price.completion)) {
+  if (!found || !Number.isFinite(found.price.prompt) || found.price.prompt < 0
+    || !Number.isFinite(found.price.completion) || found.price.completion < 0) {
     return {
       version: snapshot.version,
       model: null,

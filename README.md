@@ -15,7 +15,9 @@ are deliberately excluded.
   session/request identifiers are never uploaded.
 - Fleet sync is opt-in and sends only device label/platform, model identity,
   token categories, timestamps, and local event identifiers.
-- Public plaintext HTTP is refused. Use HTTPS for a remote collector.
+- Public plaintext HTTP is refused. Use HTTPS for a remote collector. The
+  `--allow-insecure` enrollment flag exists only for loopback or isolated
+  laboratory endpoints; never use it across a public or untrusted network.
 - The client does not run Claude or Grok commands, perform speed-test downloads,
   administer servers, create account links, enroll other devices, or revoke them.
 

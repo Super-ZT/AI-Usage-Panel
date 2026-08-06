@@ -73,6 +73,7 @@ function stateDirectory() {
   return path.resolve(process.env.PACKAGE_TEST_STATE);
 }
 function statePath() { return path.join(stateDirectory(), 'ownership.json'); }
+function dirtyProofPath() { return path.join(stateDirectory(), 'dirty-proof.json'); }
 function target(root, relative) {
   const resolved = path.resolve(root, relative);
   assert.ok(resolved.startsWith(root + path.sep), 'unsafe package-test target: ' + relative);
@@ -139,7 +140,7 @@ function createSentinel(root, relative, state) {
     if (descriptor !== undefined) {
       try {
         const stat = fs.lstatSync(filename);
-        if (sameIdentity(stat, openedIdentity)) fs.unlinkSync(filename);
+        if (!openedIdentity || sameIdentity(stat, openedIdentity)) fs.unlinkSync(filename);
       } catch (cleanupError) { if (cleanupError.code !== 'ENOENT') err.cleanupError = cleanupError; }
     }
     throw err;
@@ -401,8 +402,8 @@ function inspect(inventoryFile, extractedRoot) {
 
   const packedConfig = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'config.example.json'), 'utf8'));
   assert.strictEqual(packedConfig.openrouter.apiKey, '', 'packed config contains an API key');
-  assert.strictEqual(packedConfig.sync.deviceCredential, '', 'packed config contains a device credential');
-  assert.strictEqual(packedConfig.sync.deviceId, '', 'packed config contains a real device identifier');
+  assert.ok(!Object.hasOwn(packedConfig.sync, 'deviceCredential'), 'packed config suggests storing a device credential');
+  assert.ok(!Object.hasOwn(packedConfig.sync, 'deviceId'), 'packed config suggests storing a device identifier');
   const sensitiveMatches = [];
   for (const relative of archiveEntries) {
     const text = fs.readFileSync(path.join(extractedRoot, relative), 'utf8');
@@ -444,11 +445,36 @@ function inspect(inventoryFile, extractedRoot) {
 
 function verifyClean() {
   const root = resolveRoot();
-  assert.ok(unsafe.every((relative) => !fs.existsSync(target(root, relative))));
   const label = process.env.PACKAGE_TEST_VERIFY_LABEL || 'interruption';
   const status = process.env.PACKAGE_TEST_VERIFY_STATUS || '143';
-  console.log('  ' + label + '_exit=' + status + ' owned_paths_remaining=0');
+  const proof = JSON.parse(fs.readFileSync(dirtyProofPath(), 'utf8'));
+  assert.strictEqual(proof.root, root, 'cleanup proof belongs to a different root');
+  assert.ok(Array.isArray(proof.files) && proof.files.length > 0,
+    label + ' cleanup proof has no invocation-owned files');
+  for (const owned of proof.files) {
+    assert.ok(!fs.existsSync(target(root, owned.relative)),
+      label + ' cleanup left invocation-owned path: ' + owned.relative);
+  }
+  assert.ok(unsafe.every((relative) => !fs.existsSync(target(root, relative))));
+  console.log('  ' + label + '_exit=' + status + ' owned_paths_created=' + proof.files.length +
+    ' owned_paths_remaining=0');
   console.log('  ok   ' + label + ' cleanup removes only invocation-owned paths');
+}
+
+function verifyDirty() {
+  const root = resolveRoot();
+  const state = readState(root);
+  const label = process.env.PACKAGE_TEST_VERIFY_LABEL || 'fixture';
+  assert.ok(state.files.length > 0, label + ' fixture created no invocation-owned files');
+  for (const owned of state.files) {
+    const stat = fs.lstatSync(target(root, owned.relative));
+    assert.ok(stat.isFile() && sameIdentity(stat, owned),
+      label + ' fixture ownership changed before cleanup: ' + owned.relative);
+  }
+  fs.writeFileSync(dirtyProofPath(), JSON.stringify({ root, files: state.files }), {
+    flag: 'wx', mode: 0o600
+  });
+  console.log('  ok   ' + label + ' fixture creates invocation-owned paths before cleanup');
 }
 
 const command = process.argv[2];
@@ -460,5 +486,6 @@ else if (command === 'cleanup') cleanupOwned(resolveRoot());
 else if (command === 'selftest') selfTest();
 else if (command === 'archive-name') archiveName(process.argv[3]);
 else if (command === 'inspect') inspect(process.argv[3], process.argv[4]);
+else if (command === 'verify-dirty') verifyDirty();
 else if (command === 'verify-clean') verifyClean();
 else throw new Error('unknown package test command');

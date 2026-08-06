@@ -36,8 +36,6 @@
   "sync": {
     "enabled": false,
     "endpoint": "",
-    "deviceCredential": "",
-    "deviceId": "",
     "liveDelaySeconds": 5,
     "localPollSeconds": 15,
     "intervalMinutes": 5,

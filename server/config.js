@@ -31,16 +31,17 @@ function parseSecretFile(raw) {
 
 function loadExternalSecrets(file, target) {
   if (!file || !path.isAbsolute(file)) throw new Error('USAGE_PANEL_SECRETS_FILE must be an absolute path');
-  if (fs.lstatSync(file).isSymbolicLink()) throw new Error('USAGE_PANEL_SECRETS_FILE must not be a symbolic link');
-  const stat = fs.statSync(file);
+  const normalized = path.resolve(file);
+  if (fs.lstatSync(normalized).isSymbolicLink()) throw new Error('USAGE_PANEL_SECRETS_FILE must not be a symbolic link');
+  const stat = fs.statSync(normalized);
   if (!stat.isFile()) throw new Error('USAGE_PANEL_SECRETS_FILE must name a regular file');
   if (stat.size > MAX_SECRET_FILE_BYTES) throw new Error('USAGE_PANEL_SECRETS_FILE is too large');
   // Docker projects a host root-only secret into /run/secrets as a read-only
   // file. Outside that projection, reject group/world-readable source files.
-  if (!file.startsWith('/run/secrets/') && (stat.mode & 0o077)) {
+  if (!normalized.startsWith('/run/secrets/') && (stat.mode & 0o077)) {
     throw new Error('USAGE_PANEL_SECRETS_FILE must be owner-only (mode 0600)');
   }
-  const values = parseSecretFile(fs.readFileSync(file, 'utf8'));
+  const values = parseSecretFile(fs.readFileSync(normalized, 'utf8'));
   for (const [key, value] of Object.entries(values)) target[key] = value;
   return Object.keys(values);
 }

@@ -325,6 +325,73 @@ const codexSecond = {
     assert.strictEqual(result.flatAmount, null);
   });
 
+  await test('negative catalogue rates are unknown rather than subtracting cost', () => {
+    const result = pricing.priceTokens('negative-rate-model', { in: 100, out: 10 }, {
+      overrides: {
+        'negative-rate-model': { id: 'custom/negative', prompt: -0.01, completion: 0.02 }
+      }
+    });
+    assert.strictEqual(result.status, 'unknown');
+    assert.strictEqual(result.amount, null);
+  });
+
+  await test('a complete final JSON line is committed at stable end-of-file without a newline', () => {
+    const file = path.join(scratch, 'complete-unterminated.jsonl');
+    const row = JSON.stringify({ value: 'complete-json-without-newline' });
+    fs.writeFileSync(file, row, 'utf8');
+    const seen = [];
+    const checkpoint = localUsage.scanIncremental(file, {}, (line) => seen.push(JSON.parse(line)));
+    assert.deepStrictEqual(seen, [{ value: 'complete-json-without-newline' }]);
+    assert.strictEqual(checkpoint.offset, Buffer.byteLength(row));
+  });
+
+  await test('an incomplete final JSON line stays pending without advancing its checkpoint', () => {
+    const file = path.join(scratch, 'incomplete-unterminated.jsonl');
+    const partial = '{"value":"writer-still-active';
+    fs.writeFileSync(file, partial, 'utf8');
+    const seen = [];
+    const checkpoint = localUsage.scanIncremental(file, {}, (line) => seen.push(line));
+    assert.deepStrictEqual(seen, []);
+    assert.strictEqual(checkpoint.offset, 0);
+  });
+
+  await test('a retained partial line is processed once after a later append completes it', () => {
+    const file = path.join(scratch, 'later-completed.jsonl');
+    const partial = '{"value":"later-completed';
+    fs.writeFileSync(file, partial, 'utf8');
+    const seen = [];
+    const pending = localUsage.scanIncremental(file, {}, (line) => seen.push(JSON.parse(line)));
+    assert.strictEqual(pending.offset, 0);
+    fs.appendFileSync(file, '"}', 'utf8');
+    const completed = localUsage.scanIncremental(file, pending, (line) => seen.push(JSON.parse(line)));
+    assert.deepStrictEqual(seen, [{ value: 'later-completed' }]);
+    assert.strictEqual(completed.offset, fs.statSync(file).size);
+  });
+
+  await test('split UTF-8 in a complete unterminated line survives chunk boundaries', () => {
+    const file = path.join(scratch, 'split-utf8.jsonl');
+    const prefix = '{"value":"' + 'x'.repeat(64 * 1024 - Buffer.byteLength('{"value":"') - 1);
+    const row = prefix + '€"}';
+    assert.strictEqual(Buffer.byteLength(prefix), 64 * 1024 - 1);
+    fs.writeFileSync(file, row, 'utf8');
+    const seen = [];
+    const checkpoint = localUsage.scanIncremental(file, {}, (line) => seen.push(JSON.parse(line)));
+    assert.strictEqual(seen.length, 1);
+    assert.ok(seen[0].value.endsWith('€'));
+    assert.strictEqual(checkpoint.offset, Buffer.byteLength(row));
+  });
+
+  await test('a committed unterminated line is not emitted again from its saved checkpoint', () => {
+    const file = path.join(scratch, 'unterminated-no-duplicate.jsonl');
+    const row = JSON.stringify({ value: 'emit-once' });
+    fs.writeFileSync(file, row, 'utf8');
+    const seen = [];
+    const checkpoint = localUsage.scanIncremental(file, {}, (line) => seen.push(JSON.parse(line)));
+    const unchanged = localUsage.scanIncremental(file, checkpoint, (line) => seen.push(JSON.parse(line)));
+    assert.deepStrictEqual(seen, [{ value: 'emit-once' }]);
+    assert.strictEqual(unchanged.offset, checkpoint.offset);
+  });
+
   await test('staged Claude 1h cache writes price at cacheWrite1h (openrouter-2026-08-03)', () => {
     // Exact staged measurement shape: 1h writes were collapsed to aggregate
     // cache_write and billed at the five-minute rate ($0.00835). Correct bill

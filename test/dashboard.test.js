@@ -418,9 +418,9 @@ function usage(id, harness, model, ts, tokens) {
     assert.ok(bFleet.json.devices.some((device) => device.id === b1.deviceId));
     assert.ok(!bFleet.json.devices.some((device) => device.id === a1.deviceId));
     assert.ok(!bFleet.json.byDevice[a1.deviceId]);
-    assert.ok(!Object.keys(bFleet.json.byModel || {}).some((model) =>
-      aFleet.json.byModel[model] && aFleet.json.byModel[model].tokens.cache_write === 6540
-      && bFleet.json.total.tokens.cache_write === 0));
+    assert.strictEqual(bFleet.json.total.tokens.cache_write, 0);
+    assert.ok(!Object.values(bFleet.json.byModel || {}).some((bucket) =>
+      bucket.tokens.cache_write === 6540));
 
     // Direct device probe for the other company returns empty facts, not filtered leakage.
     const probe = await request(port, 'GET', '/api/v1/fleet?device=' + b1.deviceId, null, {

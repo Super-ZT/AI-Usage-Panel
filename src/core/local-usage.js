@@ -11,11 +11,14 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { TextDecoder } = require('util');
 
 const { dataDir, ensureDir } = require('./paths');
 
 const STATE_VERSION = 2;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
+const READ_CHUNK_BYTES = 64 * 1024;
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 /** @returns {string} */
 function checkpointPath() {
@@ -197,31 +200,58 @@ function scanIncremental(file, checkpoint, onLine) {
     : 0;
   const runtime = Object.assign({}, start ? (previous.runtime || {}) : {});
   const handle = fs.openSync(file, 'r');
-  let buffer;
+  let position = start;
+  let pending = Buffer.alloc(0);
+  let committed = start;
+  let endStat;
   try {
-    buffer = Buffer.alloc(stat.size - start);
-    if (buffer.length) fs.readSync(handle, buffer, 0, buffer.length, start);
+    const block = Buffer.alloc(Math.min(READ_CHUNK_BYTES, Math.max(1, stat.size - start)));
+    while (position < stat.size) {
+      const bytes = fs.readSync(handle, block, 0, Math.min(block.length, stat.size - position), position);
+      if (!bytes) break;
+      position += bytes;
+      pending = pending.length
+        ? Buffer.concat([pending, block.subarray(0, bytes)])
+        : Buffer.from(block.subarray(0, bytes));
+
+      let cursor = 0;
+      for (;;) {
+        const newline = pending.indexOf(10, cursor);
+        if (newline === -1) break;
+        const line = pending.subarray(cursor, newline).toString('utf8').replace(/\r$/, '');
+        if (line.trim()) onLine(line, runtime);
+        committed += newline - cursor + 1;
+        cursor = newline + 1;
+      }
+      if (cursor) pending = Buffer.from(pending.subarray(cursor));
+    }
+    endStat = fs.fstatSync(handle);
+
+    const stableEnd = position === stat.size
+      && endStat.size === stat.size
+      && String(endStat.ino) === String(stat.ino)
+      && String(endStat.dev) === String(stat.dev)
+      && endStat.mtimeMs === stat.mtimeMs
+      && endStat.ctimeMs === stat.ctimeMs;
+    if (pending.length && stableEnd) {
+      let line = null;
+      try {
+        const decoded = STRICT_UTF8.decode(pending).replace(/\r$/, '');
+        if (decoded.trim()) {
+          JSON.parse(decoded);
+          line = decoded;
+        }
+      } catch (_) {
+        // The writer may still be completing JSON or a split UTF-8 sequence.
+      }
+      if (line !== null) {
+        onLine(line, runtime);
+        committed += pending.length;
+        pending = Buffer.alloc(0);
+      }
+    }
   } finally {
     fs.closeSync(handle);
-  }
-
-  let committed = start;
-  let cursor = 0;
-  while (cursor < buffer.length) {
-    const newline = buffer.indexOf(10, cursor);
-    const end = newline === -1 ? buffer.length : newline;
-    const chunk = buffer.subarray(cursor, end);
-    const line = chunk.toString('utf8').replace(/\r$/, '');
-    if (newline === -1 && line.trim()) {
-      // JSONL writers can be observed between writes. Do not advance beyond an
-      // incomplete tail or the completed event would be lost forever.
-      try { JSON.parse(line); } catch (_) { break; }
-    }
-    if (line.trim()) onLine(line, runtime);
-    const consumed = end - cursor + (newline === -1 ? 0 : 1);
-    committed += consumed;
-    cursor = end + (newline === -1 ? 0 : 1);
-    if (newline === -1) break;
   }
 
   return {

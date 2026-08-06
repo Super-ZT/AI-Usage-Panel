@@ -108,6 +108,25 @@ function fakeInstance(handler) {
     await instance.close();
   });
 
+  await test('invalid token shapes are skipped in favor of valid numeric candidates', async () => {
+    const instance = await fakeInstance((req, res) => {
+      if (req.url === '/api/usage') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          tokens: { input: false, output: [] },
+          usage: { input_tokens: '9', output_tokens: '   ' },
+          total_tokens: { output: 4 }
+        }));
+        return;
+      }
+      res.writeHead(404); res.end('{}');
+    });
+    const result = await agentZero.tokens({ config: { host: instance.url } });
+    assert.strictEqual(result.tokens.in, 9);
+    assert.strictEqual(result.tokens.out, 4);
+    await instance.close();
+  });
+
   await test('a reachable instance without usage reports that, not zero', async () => {
     const instance = await fakeInstance((req, res) => {
       if (req.url === '/api/health') {

@@ -94,10 +94,11 @@ function event(id, device, days, harness, model, tokens) {
 
   await test('ordered migrations are idempotent and readiness includes pricing refresh', async () => {
     assert.deepStrictEqual(migrations, ['001_company_security.sql', '002_indexes.sql', '003_manager_dashboard.sql',
-      '004_operations_readiness.sql', '005_operations_constraints.sql', '006_user_accounts.sql']);
+      '004_operations_readiness.sql', '005_operations_constraints.sql', '006_user_accounts.sql',
+      '007_pricing_catalogue_index.sql']);
     assert.deepStrictEqual(await repository.migrate(pool), migrations);
     const ready = await repository.readiness(pool);
-    assert.strictEqual(ready.migrations, 6); assert.match(ready.pricingVersion, /^openrouter-/);
+    assert.strictEqual(ready.migrations, 7); assert.match(ready.pricingVersion, /^openrouter-/);
     const backfilled = await pool.query(
       `SELECT pricing_status,pricing_amount,pricing_catalogue_version
          FROM usage_events WHERE company_id=$1 AND event_id='pre-operations-event-01'`,

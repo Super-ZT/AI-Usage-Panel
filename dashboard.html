@@ -126,6 +126,8 @@ function fmtNum(n){ if(n==null||isNaN(n)) return '—'; n=Number(n);
   if(Math.abs(n)>=1e3) return (n/1e3).toFixed(1)+'K';
   return String(Math.round(n)); }
 function money(n){ if(n==null||isNaN(n)) return '—'; return '$'+Number(n).toFixed(2); }
+function finiteOrZero(n){ n=Number(n); return Number.isFinite(n)?n:0; }
+function countAttr(ts){ ts=Number(ts); return Number.isFinite(ts)&&ts>=0?String(ts):''; }
 function abs(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'}); }
 function durShort(ms){ if(ms==null||ms<0) return '—'; const s=Math.floor(ms/1000);
   const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
@@ -150,7 +152,7 @@ function bar(name, w){
   return '<div class="brow">'
     + '<div class="r1"><span class="bname">'+esc(name)+'</span>'
     + '<span class="bpct" style="color:'+col+'">'+Math.round(left)+'%<small>LEFT</small></span></div>'
-    + '<div class="btime">'+abs(w.resetAt)+' <span style="color:var(--dim)">·</span> <span data-count="'+(w.resetAt||'')+'">'+durShort((w.resetAt||0)-Date.now())+'</span></div>'
+    + '<div class="btime">'+abs(w.resetAt)+' <span style="color:var(--dim)">·</span> <span data-count="'+countAttr(w.resetAt)+'">'+durShort((finiteOrZero(w.resetAt))-Date.now())+'</span></div>'
     + '<div class="track"><div class="fill" style="width:'+left+'%;background:'+col+'"></div><div class="knob" style="left:'+left+'%;border-color:'+col+'"></div></div>'
     + '</div>';
 }
@@ -180,7 +182,7 @@ function claudeCard(p){
       + '<div class="kv"><div class="k">burn/h</div><div class="v">'+fmtNum(p.burnPerHour)+'</div></div>'
       + '<div class="kv"><div class="k">7d tok</div><div class="v">'+fmtNum(p.weekTokens)+'</div></div>'
       + '</div><div class="btime" style="margin-top:8px">'+esc(p.note||'')+'</div></div></div>'
-      + foot([['RESET','<span data-count="'+(p.resetAt||'')+'">'+durShort((p.resetAt||0)-Date.now())+'</span>']],'claude')+'</div>';
+      + foot([['RESET','<span data-count="'+countAttr(p.resetAt)+'">'+durShort(finiteOrZero(p.resetAt)-Date.now())+'</span>']],'claude')+'</div>';
   }
   const wk = p.weekly, ss = p.session;
   const wkLeft = wk&&wk.percent!=null ? 100-wk.percent : null;
@@ -196,7 +198,7 @@ function claudeCard(p){
     + csub
     + '<div class="body">'+ring(wkLeft)+'<div class="bars">'+bars+'</div></div>'
     + foot([
-        ['WEEK RESET', wk&&wk.resetAt?'<span data-count="'+wk.resetAt+'">'+durShort(wk.resetAt-Date.now())+'</span>':'—'],
+        ['WEEK RESET', wk&&wk.resetAt?'<span data-count="'+countAttr(wk.resetAt)+'">'+durShort(finiteOrZero(wk.resetAt)-Date.now())+'</span>':'—'],
         ['~FINISH', worstFinish?abs(worstFinish.finishAt):'—'],
         [esc(String(p.plan||'').toUpperCase()), new Date(latest.generatedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})]
       ],'claude') + '</div>';
@@ -221,7 +223,7 @@ function codexCard(p){
     + '<div class="kv"><div class="k">~finish</div><div class="v">'+(pr.finishAt?abs(pr.finishAt):'—')+'</div></div></div>'
     + '</div></div>'
     + foot([
-        ['RESET', pr.resetAt?'<span data-count="'+pr.resetAt+'">'+durShort(pr.resetAt-Date.now())+'</span>':'—'],
+        ['RESET', pr.resetAt?'<span data-count="'+countAttr(pr.resetAt)+'">'+durShort(finiteOrZero(pr.resetAt)-Date.now())+'</span>':'—'],
         [esc(String(p.label||'').replace(/^Codex\s*\(?/i,'').replace(/\)$/,'').toUpperCase()||'PLAN'), new Date(latest.generatedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})]
       ],'codex') + '</div>';
 }
@@ -251,7 +253,7 @@ function grokCard(p){
   const gsub = p.stale && p.sampledAt
     ? '<div class="csub crit">⚠ stale ('+new Date(p.sampledAt).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})+') — '
       + (p.authFailed ? 'token rejected, run <b>grok</b> to sign in again' : 'waiting for token refresh')+'</div>'
-    : '<div class="csub '+sevClass(wkLeft==null?100:wkLeft)+'">weekly plan quota · '+(wk?Math.round(wk.usedPct)+'% used':'—')+'</div>';
+    : '<div class="csub '+sevClass(wkLeft==null?100:wkLeft)+'">weekly plan quota · '+(wk&&wk.usedPct!=null?Math.round(wk.usedPct)+'% used':'—')+'</div>';
   function pbar(name, usedPct, detail){
     if(usedPct==null) return '';
     const left = Math.max(0,100-usedPct);
@@ -264,7 +266,7 @@ function grokCard(p){
   return '<div class="card"><div class="chead"><span class="ctitle">GROK QUOTA</span></div>'
     + gsub
     + '<div class="body">'+ring(wkLeft)+'<div class="bars">'
-    + (wk?pbar('weekly credits', wk.usedPct, 'resets '+abs(wk.resetAt)+' · <span data-count="'+(wk.resetAt||'')+'">'+durShort((wk.resetAt||0)-Date.now())+'</span>'):'')
+    + (wk?pbar('weekly credits', wk.usedPct, 'resets '+abs(wk.resetAt)+' · <span data-count="'+countAttr(wk.resetAt)+'">'+durShort(finiteOrZero(wk.resetAt)-Date.now())+'</span>'):'')
     + (mo?pbar('monthly', mo.usedPct, fmtNum(mo.used)+' of '+fmtNum(mo.limit)+' credits used'):'')
     + '<div class="kvrow" style="margin-top:2px">'
     + '<div class="kv"><div class="k">tok 5h</div><div class="v">'+fmtNum(u.windowTokens)+'</div></div>'
@@ -348,12 +350,13 @@ function harnCard(){
   } else {
     body = '<div class="hgrid">' + names.map(n=>{
       const h = totals[n];
+      const tokens = h.tokens || {};
       const models = Object.keys(h.models||{}).sort((a,b)=>(h.models[b].calls||0)-(h.models[a].calls||0));
       return '<div class="hcell">'
         + '<div class="hname">'+esc(n)+'</div>'
         + '<div class="hcost">'+estMoney(h.est)+'</div>'
-        + '<div class="hmeta">'+fmtNum(h.calls)+' calls · '+fmtNum(h.tokens.in)+' in · '+fmtNum(h.tokens.out)+' out'
-        + (h.tokens.cache_read?' · '+fmtNum(h.tokens.cache_read)+' cached':'')+'</div>'
+        + '<div class="hmeta">'+fmtNum(h.calls)+' calls · '+fmtNum(tokens.in)+' in · '+fmtNum(tokens.out)+' out'
+        + (tokens.cache_read?' · '+fmtNum(tokens.cache_read)+' cached':'')+'</div>'
         + '<div class="hmodels">'+models.slice(0,4).map(m=>esc(m)+' ('+h.models[m].calls+')').join('<br>')
         + (models.length>4?'<br>+'+(models.length-4)+' more':'')+'</div>'
         + '</div>';
@@ -389,14 +392,15 @@ function tokCard(){
   const rows = tokData ? (tokData[tokMode]||[]) : [];
   const maxRows = tokMode==='days'?31:tokMode==='months'?12:10;
   const body = rows.slice(0,maxRows).map(r=>{
-    const cin = r.claude.in + (r.claude.cacheWrite||0);
-    const total = cin+r.claude.out+r.codex.in+r.codex.out+r.grok.total;
-    const rowEst = (r.claude.est||0)+(r.codex.est||0)+(r.grok.est||0)+(r.openrouter.spend||0);
-    return '<tr><td>'+r.key+'</td>'
-      + '<td>'+fmtNum(cin)+'</td><td>'+fmtNum(r.claude.out)+'</td><td class="mut">'+fmtNum(r.claude.cacheRead)+'</td><td class="mut">'+estMoney(r.claude.est)+'</td>'
-      + '<td>'+fmtNum(r.codex.in)+'</td><td>'+fmtNum(r.codex.out)+'</td><td class="mut">'+estMoney(r.codex.est)+'</td>'
-      + '<td>'+fmtNum(r.grok.total)+'</td><td class="mut">'+estMoney(r.grok.est)+'</td>'
-      + '<td>'+(r.openrouter.spend?money(r.openrouter.spend):'—')+'</td>'
+    const claude=r.claude||{}, codex=r.codex||{}, grok=r.grok||{}, openrouter=r.openrouter||{};
+    const cin = finiteOrZero(claude.in) + finiteOrZero(claude.cacheWrite);
+    const total = cin+finiteOrZero(claude.out)+finiteOrZero(codex.in)+finiteOrZero(codex.out)+finiteOrZero(grok.total);
+    const rowEst = finiteOrZero(claude.est)+finiteOrZero(codex.est)+finiteOrZero(grok.est)+finiteOrZero(openrouter.spend);
+    return '<tr><td>'+esc(r.key)+'</td>'
+      + '<td>'+fmtNum(cin)+'</td><td>'+fmtNum(claude.out)+'</td><td class="mut">'+fmtNum(claude.cacheRead)+'</td><td class="mut">'+estMoney(claude.est)+'</td>'
+      + '<td>'+fmtNum(codex.in)+'</td><td>'+fmtNum(codex.out)+'</td><td class="mut">'+estMoney(codex.est)+'</td>'
+      + '<td>'+fmtNum(grok.total)+'</td><td class="mut">'+estMoney(grok.est)+'</td>'
+      + '<td>'+(openrouter.spend?money(openrouter.spend):'—')+'</td>'
       + '<td class="tot">'+fmtNum(total)+'</td><td class="tot">'+estMoney(rowEst)+'</td></tr>';
   }).join('');
   const T = tokData && tokData.totals;
@@ -501,7 +505,7 @@ async function poll(force){
       if(myBuildId && data.buildId !== myBuildId && !reloading){
         reloading = true;
         setUpd('UPDATING…', false);
-        setTimeout(()=>location.reload(true), 300);
+        setTimeout(()=>location.reload(), 300);
         return;
       }
       myBuildId = data.buildId;
