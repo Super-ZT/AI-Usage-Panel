@@ -291,10 +291,11 @@ async function enroll(config) {
     label: config.label || identity().label,
     platform: config.platform || identity().platform
   }, null, config.timeoutMs);
-  if (response.status !== 201 || !response.json || !response.json.deviceCredential) {
+  const credential = response.json && (response.json.deviceCredential || response.json.credential);
+  if (response.status !== 201 || !response.json || !credential || !response.json.deviceId) {
     throw new Error(response.status === 401 ? 'invalid or expired enrollment code' : 'enrollment failed');
   }
-  return response.json;
+  return Object.assign({}, response.json, { deviceCredential: credential });
 }
 
 module.exports = { push, pushOnce, fetchFleet, enroll, validateEndpoint };

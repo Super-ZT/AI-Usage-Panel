@@ -1,0 +1,62 @@
+name: Windows installer
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-setup-exe:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci --ignore-scripts
+      - name: Check Windows packaging contracts
+        run: node test/windows-installer.test.js
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Build Setup.exe with bundled Node
+        shell: powershell
+        run: ./installer/build-windows.ps1 -Version 1.0.0
+      - name: Smoke-test silent install and uninstall
+        shell: powershell
+        run: |
+          $installer = Resolve-Path "dist/UsagePanel-Setup-1.0.0.exe"
+          $process = Start-Process $installer -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "installer exited $($process.ExitCode)" }
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs/Usage Panel"
+          $required = @(
+            (Join-Path $installDir "node/node.exe"),
+            (Join-Path $installDir "open-panel.vbs"),
+            (Join-Path $installDir "enroll-panel.ps1"),
+            (Join-Path $env:USERPROFILE "Desktop/Usage Panel.lnk"),
+            (Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/Usage Panel/Usage Panel.lnk"),
+            (Join-Path $installDir "Uninstall.exe")
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "missing after install: $path" }
+          }
+          & (Join-Path $installDir "node/node.exe") --version
+          $uninstaller = Join-Path $installDir "Uninstall.exe"
+          $process = Start-Process $uninstaller -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "uninstaller exited $($process.ExitCode)" }
+          if (Test-Path $installDir) { throw "install directory remained after uninstall" }
+          Write-Host "installer_smoke=install_shortcuts_runtime_uninstall_ok"
+      - name: Publish installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsagePanel-Setup-1.0.0
+          path: |
+            dist/UsagePanel-Setup-1.0.0.exe
+            dist/UsagePanel-Setup-1.0.0.exe.sha256
+            installer/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 30
