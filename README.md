@@ -8,6 +8,21 @@ The customer package contains only the desktop client. Server administration,
 database migrations, backups, deployment tooling, and private infrastructure
 are deliberately excluded.
 
+## Install on Windows 10 or 11
+
+1. Open the [latest Usage Panel release](https://github.com/Super-ZT/AI-Usage-Panel/releases/latest).
+2. Download `UsagePanel-Setup-<version>.exe` — not the source archive.
+3. Double-click the installer and follow the prompts.
+4. Open **Usage Panel** from the Desktop or Start Menu.
+5. If asked, create a one-time link code at
+   <https://super-zt.com/portal/usage-panel> and paste it into the app.
+
+The installer includes its own Node.js runtime, creates Desktop and Start Menu
+shortcuts, and adds a normal Windows uninstaller. Customers do **not** install
+Node.js and do not use a terminal. Version 1.0.0 is unsigned, so Windows
+SmartScreen may show **Unknown publisher**; compare the download against the
+published `.sha256` file if you want to verify its bytes.
+
 ## Safety boundaries
 
 - The dashboard and optional capture proxy bind to `127.0.0.1` by default.
@@ -21,11 +36,12 @@ are deliberately excluded.
 - The client does not run Claude or Grok commands, perform speed-test downloads,
   administer servers, create account links, enroll other devices, or revoke them.
 
-## Requirements
+## Advanced source install
 
-Node.js 18 or newer. The client has no production package dependencies.
+The source archive remains available for developers. It requires Node.js 18 or
+newer; the client has no production package dependencies.
 
-## Run locally
+### Run locally from source
 
 ```bash
 npm start
@@ -64,11 +80,16 @@ or added to usage events.
 
 ## Link this computer
 
-Account linking is intentionally owned by the future Super ZT portal flow. A
-short-lived enrollment code can currently be supplied non-interactively:
+The Windows app prompts on first launch when the computer is not yet linked.
+Create a one-time code at <https://super-zt.com/portal/usage-panel>, paste it
+into the prompt, and choose **Link computer**. Enrollment goes only to the fixed
+Super ZT HTTPS endpoint, and the one-time code is piped through standard input
+rather than exposed in the process command line.
+
+Advanced source installs can perform the same enrollment non-interactively:
 
 ```bash
-usage-panel enroll --endpoint https://usage.example --code-stdin --label reception-pc < enrollment-code.txt
+usage-panel enroll --endpoint https://super-zt.com/api/usage-panel --code-stdin --label reception-pc < enrollment-code.txt
 ```
 
 The returned upload-only credential and assigned device identity are written to

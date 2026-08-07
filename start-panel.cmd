@@ -9,20 +9,20 @@ set "NODE_EXE="
 REM 1. Explicit override wins.
 if defined USAGE_PANEL_NODE if exist "%USAGE_PANEL_NODE%" set "NODE_EXE=%USAGE_PANEL_NODE%"
 
-REM 2. Node on PATH.
+REM 2. Prefer the runtime bundled by the Windows installer.
+if not defined NODE_EXE if exist "%~dp0node\node.exe" set "NODE_EXE=%~dp0node\node.exe"
+
+REM 3. Node on PATH (developer/source installs only).
 if not defined NODE_EXE (
   for /f "delims=" %%i in ('where node 2^>nul') do (
     if not defined NODE_EXE set "NODE_EXE=%%i"
   )
 )
 
-REM 3. Common install locations.
+REM 4. Common install locations (developer/source installs only).
 if not defined NODE_EXE if exist "%ProgramFiles%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles%\nodejs\node.exe"
 if not defined NODE_EXE if exist "%ProgramFiles(x86)%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles(x86)%\nodejs\node.exe"
 if not defined NODE_EXE if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
-
-REM 4. A Node bundled next to the app (portable install).
-if not defined NODE_EXE if exist "%~dp0node\node.exe" set "NODE_EXE=%~dp0node\node.exe"
 
 if not defined NODE_EXE (
   echo Node.js was not found.

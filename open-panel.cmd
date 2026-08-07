@@ -3,6 +3,12 @@ REM Opens the Usage Panel as an app window, starting the server first if needed.
 cd /d "%~dp0"
 set URL=http://localhost:8899
 
+REM First run: let the customer paste the one-time code created in the portal.
+REM Cancelling keeps the local-only dashboard available.
+if not exist "%APPDATA%\usage-panel\enrollment.json" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0enroll-panel.ps1"
+)
+
 REM Verify the Usage Panel itself, not merely an unrelated listener on port 8899.
 powershell -NoProfile -Command "try{$r=Invoke-WebRequest -UseBasicParsing -Uri '%URL%/api/sync' -TimeoutSec 2;if($r.StatusCode -eq 200){exit 0}}catch{};exit 1" >nul 2>&1
 if errorlevel 1 (
@@ -17,6 +23,8 @@ if errorlevel 1 (
 
 if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
   start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=%URL% --window-size=1520,940
+) else if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
+  start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --app=%URL% --window-size=1520,940
 ) else if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
   start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=%URL% --window-size=1520,940
 ) else (
