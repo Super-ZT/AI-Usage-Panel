@@ -100,7 +100,15 @@ Wait-PanelReady
 $Uninstaller = Join-Path $InstallDir "Uninstall.exe"
 $uninstall = Start-Process $Uninstaller -ArgumentList "/S" -Wait -PassThru
 if ($uninstall.ExitCode -ne 0) { throw "uninstaller exited $($uninstall.ExitCode)" }
-if (Test-Path $InstallDir) { throw "install directory remained after uninstall" }
+if (Test-Path $InstallDir) {
+  Get-ChildItem $InstallDir -Recurse -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { Write-Host "uninstall_residual=$($_.FullName.Substring($InstallDir.Length))" }
+  $installPattern = [regex]::Escape($InstallDir)
+  Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and $_.CommandLine -match $installPattern
+  } | ForEach-Object { Write-Host "uninstall_holder=$($_.Name):$($_.ProcessId)" }
+  throw "install directory remained after uninstall"
+}
 if (Test-Path $DesktopShortcutPath) { throw "Desktop shortcut remained after uninstall" }
 if (Test-Path $StartMenuDir) { throw "Start Menu shortcuts remained after uninstall" }
 

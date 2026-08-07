@@ -21,6 +21,11 @@ if errorlevel 1 (
   )
 )
 
+REM Do not let the browser inherit the installation directory as its working
+REM directory. A long-lived browser process would keep that folder locked and
+REM prevent a later uninstall from removing the application.
+cd /d "%TEMP%"
+
 if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
   start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=%URL% --window-size=1520,940
 ) else if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (

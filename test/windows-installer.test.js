@@ -63,6 +63,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.doesNotMatch(opener, /enroll-panel\.ps1"\s+-OpenPanelAfterLink/,
     'the first-run parent launcher must remain the sole dashboard opener');
   assert.match(opener, /Program Files\\Microsoft\\Edge/);
+  assert.ok(opener.indexOf('cd /d "%TEMP%"') < opener.indexOf('Program Files\\Microsoft\\Edge'),
+    'browser processes must not inherit the installation directory');
 
   const enrollUi = read('enroll-panel.ps1');
   assert.match(enrollUi, /param\([\s\S]*\[switch\]\$OpenPanelAfterLink[\s\S]*\)/);
@@ -81,6 +83,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(handoff, /open-panel\.vbs/);
   assert.match(handoff, /wscript\.exe/i);
   assert.match(handoff, /Start-Process/);
+  assert.match(handoff, /GetTempPath/);
+  assert.doesNotMatch(handoff, /-WorkingDirectory \$AppRoot/);
   assert.doesNotMatch(handoff, /credential|one-time|--code/i);
 
   const workflow = read('.github/workflows/windows-installer.yml');
@@ -99,6 +103,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /api\/sync/);
   assert.match(windowsSmoke, /Remove-Item[^\n]+\.usage-panel-stop/);
   assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
+  assert.match(windowsSmoke, /uninstall_residual=/);
+  assert.match(windowsSmoke, /uninstall_holder=/);
   assert.doesNotMatch(windowsSmoke, /\$Path:/,
     'PowerShell variables immediately before a colon must use braced syntax');
 
