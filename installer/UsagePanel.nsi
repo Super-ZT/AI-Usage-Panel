@@ -1,7 +1,7 @@
 !include "MUI2.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.0.2"
+  !define VERSION "1.0.3"
 !endif
 !ifndef OUTPUT_DIR
   !define OUTPUT_DIR "..\dist"
@@ -18,8 +18,7 @@ SetCompressor /SOLID lzma
 !define MUI_ABORTWARNING
 !define MUI_ICON "..\usage-panel.ico"
 !define MUI_UNICON "..\usage-panel.ico"
-!define MUI_FINISHPAGE_RUN "$WINDIR\System32\wscript.exe"
-!define MUI_FINISHPAGE_RUN_PARAMETERS "$\"$INSTDIR\open-panel.vbs$\""
+!define MUI_FINISHPAGE_RUN "$INSTDIR\UsagePanel.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Open Usage Panel"
 
 !insertmacro MUI_PAGE_WELCOME
@@ -33,6 +32,7 @@ SetCompressor /SOLID lzma
 Section "Usage Panel" SEC_MAIN
   SetShellVarContext current
   SetOutPath "$INSTDIR"
+  Delete "$INSTDIR\.usage-panel-stop"
   File /r "..\dist\app\*"
 
   WriteRegStr HKCU "Software\UsagePanel" "InstallDir" "$INSTDIR"
@@ -46,8 +46,8 @@ Section "Usage Panel" SEC_MAIN
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\Usage Panel"
-  CreateShortCut "$DESKTOP\Usage Panel.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\open-panel.vbs"' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
-  CreateShortCut "$SMPROGRAMS\Usage Panel\Usage Panel.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\open-panel.vbs"' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$DESKTOP\Usage Panel.lnk" "$INSTDIR\UsagePanel.exe" "" "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$SMPROGRAMS\Usage Panel\Usage Panel.lnk" "$INSTDIR\UsagePanel.exe" "" "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Usage Panel\Link this computer.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\enroll-panel.ps1" -OpenPanelAfterLink' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Usage Panel\Uninstall Usage Panel.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd

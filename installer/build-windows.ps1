@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "1.0.2"
+  [string]$Version = "1.0.3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +14,17 @@ $NodeUrl = "https://nodejs.org/dist/v$NodeVersion/$NodeArchive"
 Remove-Item $Dist -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $Stage -ItemType Directory -Force | Out-Null
 
+$HostPublish = Join-Path $env:RUNNER_TEMP "usage-panel-host"
+Remove-Item $HostPublish -Recurse -Force -ErrorAction SilentlyContinue
+dotnet publish (Join-Path $Root "app\UsagePanel.csproj") `
+  --configuration Release --runtime win-x64 --self-contained true `
+  --output $HostPublish --nologo
+if ($LASTEXITCODE -ne 0) { throw "UsagePanel.exe build failed with exit code $LASTEXITCODE" }
+Copy-Item (Join-Path $HostPublish "*") $Stage -Recurse -Force
+if (-not (Test-Path (Join-Path $Stage "UsagePanel.exe"))) {
+  throw "UsagePanel.exe was not staged."
+}
+
 $clientFiles = @(
   "bin",
   "src",
@@ -24,9 +35,6 @@ $clientFiles = @(
   "LICENSE",
   "usage-panel.ico",
   "start-panel.cmd",
-  "start-hidden.vbs",
-  "open-panel.cmd",
-  "open-panel.vbs",
   "open-panel-after-link.ps1",
   "enroll-panel.ps1",
   "uninstall-helper.ps1"
