@@ -12,8 +12,10 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   const required = [
     'installer/UsagePanel.nsi',
     'installer/build-windows.ps1',
+    'installer/windows-smoke.ps1',
     'installer/RELEASE_NOTES.md',
     'enroll-panel.ps1',
+    'open-panel-after-link.ps1',
     'uninstall-helper.ps1',
     '.github/workflows/windows-installer.yml'
   ];
@@ -22,10 +24,14 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   }
 
   const nsi = read('installer/UsagePanel.nsi');
+  assert.match(nsi, /!define VERSION "1\.0\.2"/);
   assert.match(nsi, /RequestExecutionLevel user/);
   assert.match(nsi, /UsagePanel-Setup-\$\{VERSION\}\.exe/);
+  assert.ok(nsi.indexOf('SetShellVarContext current') < nsi.indexOf('CreateShortCut "$DESKTOP\\Usage Panel.lnk"'),
+    'shortcuts must resolve through the current user shell folders');
   assert.match(nsi, /CreateShortCut "\$DESKTOP\\Usage Panel\.lnk"/);
   assert.match(nsi, /CreateDirectory "\$SMPROGRAMS\\Usage Panel"/);
+  assert.match(nsi, /Link this computer\.lnk[^\n]+enroll-panel\.ps1[^\n]+-OpenPanelAfterLink/);
   assert.match(nsi, /WriteUninstaller/);
   assert.match(nsi, /Section "Uninstall"/);
 
@@ -41,22 +47,80 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   const pathLookup = start.indexOf('where node');
   assert.ok(bundled >= 0 && pathLookup >= 0 && bundled < pathLookup,
     'bundled Node must be preferred over a machine-wide Node installation');
+  assert.match(start, /STOP_FILE=.*\.usage-panel-stop/);
+  assert.match(start, /cd \/d "%TEMP%"/);
+  assert.doesNotMatch(start, /cd \/d "%~dp0"/,
+    'the long-lived refresher launcher must not lock the install directory');
+  assert.ok((start.match(/if exist "%STOP_FILE%" exit \/b 0/g) || []).length >= 2,
+    'the restart loop must stop both before launch and after Node is terminated');
+
+  const uninstallHelper = read('uninstall-helper.ps1');
+  assert.match(uninstallHelper, /\.usage-panel-stop/);
+  assert.match(uninstallHelper, /Stop-Process/);
+  assert.match(uninstallHelper, /start-panel\.cmd/);
+  assert.match(uninstallHelper, /open-panel\.cmd/);
+  assert.match(uninstallHelper, /StringComparison\]::OrdinalIgnoreCase/);
+  assert.match(uninstallHelper, /Stop-Process -Id \$_\.ProcessId -Force/);
+  assert.match(uninstallHelper, /Start-Sleep -Milliseconds 100/);
 
   const opener = read('open-panel.cmd');
   assert.match(opener, /enrollment\.json/);
   assert.match(opener, /enroll-panel\.ps1/);
+  assert.doesNotMatch(opener, /enroll-panel\.ps1"\s+-OpenPanelAfterLink/,
+    'the first-run parent launcher must remain the sole dashboard opener');
   assert.match(opener, /Program Files\\Microsoft\\Edge/);
+  assert.match(opener, /cd \/d "%TEMP%"/);
+  assert.doesNotMatch(opener, /cd \/d "%~dp0"/,
+    'launcher children must not inherit the install directory as their working directory');
+  assert.ok(opener.indexOf('cd /d "%TEMP%"') < opener.indexOf('start "" wscript.exe'),
+    'the server launcher must inherit a safe working directory');
 
   const enrollUi = read('enroll-panel.ps1');
+  assert.match(enrollUi, /param\([\s\S]*\[switch\]\$OpenPanelAfterLink[\s\S]*\)/);
   assert.match(enrollUi, /https:\/\/super-zt\.com\/api\/usage-panel/);
   assert.match(enrollUi, /RedirectStandardInput\s*=\s*\$true/);
+  assert.match(enrollUi, /Linked\. Opening Usage Panel/);
+  assert.doesNotMatch(enrollUi, /MessageBox\]::Show\("This computer is linked/,
+    'successful enrollment must not pause behind a blocking completion dialog');
+  assert.match(enrollUi, /if \(\$OpenPanelAfterLink\)[\s\S]*open-panel-after-link\.ps1/);
+  assert.strictEqual((enrollUi.match(/open-panel-after-link\.ps1/g) || []).length, 1,
+    'direct linking must hand off to the panel exactly once');
   assert.doesNotMatch(enrollUi, /--allow-insecure/);
   assert.doesNotMatch(enrollUi, /Write-(?:Host|Output).*code/i);
+
+  const handoff = read('open-panel-after-link.ps1');
+  assert.match(handoff, /open-panel\.vbs/);
+  assert.match(handoff, /wscript\.exe/i);
+  assert.match(handoff, /Start-Process/);
+  assert.match(handoff, /GetTempPath/);
+  assert.doesNotMatch(handoff, /-WorkingDirectory \$AppRoot/);
+  assert.doesNotMatch(handoff, /credential|one-time|--code/i);
 
   const workflow = read('.github/workflows/windows-installer.yml');
   assert.match(workflow, /runs-on:\s*windows-latest/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
-  assert.match(workflow, /UsagePanel-Setup-/);
+  assert.match(workflow, /UsagePanel-Setup-1\.0\.2/);
+  assert.match(workflow, /\.\/installer\/windows-smoke\.ps1/);
+
+  const windowsSmoke = read('installer/windows-smoke.ps1');
+  assert.match(windowsSmoke, /GetFolderPath\([^\n]*DesktopDirectory/);
+  assert.match(windowsSmoke, /GetFolderPath\([^\n]*Programs/);
+  assert.match(windowsSmoke, /CreateShortcut/);
+  assert.match(windowsSmoke, /TargetPath/);
+  assert.match(windowsSmoke, /Arguments/);
+  assert.match(windowsSmoke, /open-panel-after-link\.ps1/);
+  assert.match(windowsSmoke, /api\/sync/);
+  assert.match(windowsSmoke, /Remove-Item[^\n]+\.usage-panel-stop/);
+  assert.match(windowsSmoke, /function Wait-PathRemoved/);
+  assert.match(windowsSmoke, /Wait-PathRemoved -Path \$InstallDir/);
+  assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
+  assert.match(windowsSmoke, /uninstall_residual=/);
+  assert.match(windowsSmoke, /uninstall_holder=/);
+  assert.doesNotMatch(windowsSmoke, /\$Path:/,
+    'PowerShell variables immediately before a colon must use braced syntax');
+
+  const packageJson = JSON.parse(read('package.json'));
+  assert.strictEqual(packageJson.version, '1.0.2');
 
   const sync = require('../src/sync/client');
   const syncSource = read('src/sync/client.js');
@@ -161,7 +225,7 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     await new Promise((resolve) => server.close(resolve));
   }
 
-  console.log('  ok   Windows installer bundles Node, creates shortcuts, uninstalls, and enrolls over fixed HTTPS');
+  console.log('  ok   Windows installer opens the panel after both link paths and resolves real user shortcuts');
 })().catch((err) => {
   console.error(err.stack || err.message);
   process.exit(1);

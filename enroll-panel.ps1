@@ -1,3 +1,7 @@
+param(
+  [switch]$OpenPanelAfterLink
+)
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -6,6 +10,7 @@ $Endpoint = "https://super-zt.com/api/usage-panel"
 $AppRoot = $PSScriptRoot
 $Node = Join-Path $AppRoot "node\node.exe"
 $Cli = Join-Path $AppRoot "bin\usage-panel.js"
+$script:LinkedSuccessfully = $false
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Link Usage Panel"
@@ -109,7 +114,11 @@ $linkButton.Add_Click({
       if (-not $errorText) { $errorText = "The code was rejected or expired." }
       throw $errorText.Trim()
     }
-    [System.Windows.Forms.MessageBox]::Show("This computer is linked. Usage Panel will now sync permitted usage totals.", "Usage Panel") | Out-Null
+    $script:LinkedSuccessfully = $true
+    $status.Text = "Linked. Opening Usage Panel..."
+    $linkButton.Text = "Opening Usage Panel..."
+    $form.Refresh()
+    Start-Sleep -Milliseconds 600
     $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $form.Close()
   } catch {
@@ -121,3 +130,9 @@ $linkButton.Add_Click({
 })
 
 [void]$form.ShowDialog()
+
+if ($script:LinkedSuccessfully) {
+  if ($OpenPanelAfterLink) {
+    & (Join-Path $AppRoot "open-panel-after-link.ps1")
+  }
+}

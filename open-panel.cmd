@@ -1,6 +1,8 @@
 @echo off
 REM Opens the Usage Panel as an app window, starting the server first if needed.
-cd /d "%~dp0"
+REM Keep every child process out of the install directory so Windows can remove
+REM it cleanly during a later uninstall.
+cd /d "%TEMP%"
 set URL=http://localhost:8899
 
 REM First run: let the customer paste the one-time code created in the portal.
