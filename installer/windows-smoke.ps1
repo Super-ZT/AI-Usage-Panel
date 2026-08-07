@@ -93,6 +93,7 @@ Wait-PanelReady
 # direct "Link this computer" enrollment and require the dashboard to return.
 & (Join-Path $InstallDir "uninstall-helper.ps1")
 Wait-PanelStopped
+Remove-Item (Join-Path $InstallDir ".usage-panel-stop") -Force
 & (Join-Path $InstallDir "open-panel-after-link.ps1")
 Wait-PanelReady
 

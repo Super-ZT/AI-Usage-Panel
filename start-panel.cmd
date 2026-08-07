@@ -5,6 +5,7 @@ setlocal
 cd /d "%~dp0"
 
 set "NODE_EXE="
+set "STOP_FILE=%~dp0.usage-panel-stop"
 
 REM 1. Explicit override wins.
 if defined USAGE_PANEL_NODE if exist "%USAGE_PANEL_NODE%" set "NODE_EXE=%USAGE_PANEL_NODE%"
@@ -31,7 +32,9 @@ if not defined NODE_EXE (
 )
 
 :loop
+if exist "%STOP_FILE%" exit /b 0
 "%NODE_EXE%" "%~dp0refresher.js"
 if "%errorlevel%"=="66" exit /b 0
+if exist "%STOP_FILE%" exit /b 0
 timeout /t 3 /nobreak >nul
 goto loop

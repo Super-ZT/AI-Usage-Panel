@@ -47,6 +47,15 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   const pathLookup = start.indexOf('where node');
   assert.ok(bundled >= 0 && pathLookup >= 0 && bundled < pathLookup,
     'bundled Node must be preferred over a machine-wide Node installation');
+  assert.match(start, /STOP_FILE=.*\.usage-panel-stop/);
+  assert.ok((start.match(/if exist "%STOP_FILE%" exit \/b 0/g) || []).length >= 2,
+    'the restart loop must stop both before launch and after Node is terminated');
+
+  const uninstallHelper = read('uninstall-helper.ps1');
+  assert.match(uninstallHelper, /\.usage-panel-stop/);
+  assert.match(uninstallHelper, /Stop-Process/);
+  assert.match(uninstallHelper, /start-panel\.cmd/);
+  assert.match(uninstallHelper, /Start-Sleep -Milliseconds 100/);
 
   const opener = read('open-panel.cmd');
   assert.match(opener, /enrollment\.json/);
@@ -88,6 +97,7 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /Arguments/);
   assert.match(windowsSmoke, /open-panel-after-link\.ps1/);
   assert.match(windowsSmoke, /api\/sync/);
+  assert.match(windowsSmoke, /Remove-Item[^\n]+\.usage-panel-stop/);
   assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
   assert.doesNotMatch(windowsSmoke, /\$Path:/,
     'PowerShell variables immediately before a colon must use braced syntax');

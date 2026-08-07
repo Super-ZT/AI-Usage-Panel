@@ -3,7 +3,8 @@
 This update removes the confusing blocking success dialog after linking. Both
 first-run linking and the Start Menu **Link this computer** action now say that
 Usage Panel is opening, close the link form, and open the main dashboard
-automatically exactly once.
+automatically exactly once. The background launcher also stops cleanly before
+uninstall so the application directory is removed after the panel has run.
 
 This package is the consumer installer for Windows 10 and Windows 11.
 
