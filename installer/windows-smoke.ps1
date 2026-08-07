@@ -68,6 +68,16 @@ function Wait-VisibleWindow {
     if ($candidate) { return $candidate }
     Start-Sleep -Milliseconds 500
   }
+  Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | ForEach-Object {
+    $_.Refresh()
+    Write-Host "window_probe=handle_nonzero:$($_.MainWindowHandle -ne 0);title:$($_.MainWindowTitle)"
+  }
+  if (Test-Path $DiagnosticFile) {
+    Get-Content $DiagnosticFile | ForEach-Object {
+      $status = ($_ -split ' ')[-1]
+      Write-Host "diagnostic_status=$status"
+    }
+  }
   throw "Usage Panel did not create the expected visible top-level window: $Title"
 }
 

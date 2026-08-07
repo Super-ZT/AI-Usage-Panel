@@ -204,7 +204,8 @@ internal sealed class MainForm : Form
         Process.Start(start);
         Record("SERVER_START_REQUESTED");
 
-        for (var attempt = 0; attempt < 60; attempt++)
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(500);
             if (await ServerReadyAsync())
@@ -220,7 +221,7 @@ internal sealed class MainForm : Form
     {
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
             using var response = await client.GetAsync(PanelUrl + "/api/sync");
             return response.IsSuccessStatusCode;
         }
