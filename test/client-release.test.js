@@ -62,22 +62,27 @@ function allFiles(directory, prefix = '') {
 
 (async () => {
   const server = http.createServer(async (req, res) => {
-    const raw = await readBody(req);
-    if (req.url === '/api/v1/enroll') {
-      const body = JSON.parse(raw);
-      assert.strictEqual(body.code, 'sentinel-one-use-code');
-      res.writeHead(201, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ deviceCredential: credentialSentinel, deviceId: deviceSentinel }));
-      return;
+    try {
+      const raw = await readBody(req);
+      if (req.url === '/api/v1/enroll') {
+        const body = JSON.parse(raw);
+        assert.strictEqual(body.code, 'sentinel-one-use-code');
+        res.writeHead(201, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ deviceCredential: credentialSentinel, deviceId: deviceSentinel }));
+        return;
+      }
+      if (req.url === '/api/v1/events') {
+        uploaded = raw;
+        const body = JSON.parse(raw);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ accepted: body.events.map((event) => event.event_id) }));
+        return;
+      }
+      res.writeHead(404); res.end();
+    } catch (_) {
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'test server failure' }));
     }
-    if (req.url === '/api/v1/events') {
-      uploaded = raw;
-      const body = JSON.parse(raw);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ accepted: body.events.map((event) => event.event_id) }));
-      return;
-    }
-    res.writeHead(404); res.end();
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -131,9 +136,10 @@ function allFiles(directory, prefix = '') {
       assert.ok(!uploaded.includes(forbidden), 'outbound payload leaked ' + forbidden);
     }
     const outbound = JSON.parse(uploaded);
-    assert.deepStrictEqual(Object.keys(outbound.events[0]).sort(), [
-      'duration_ms', 'event_id', 'harness', 'model', 'pricing_model', 'provider', 'source', 'status', 'tokens', 'ts'
-    ].filter((key) => outbound.events[0][key] !== undefined).sort());
+    const requiredKeys = ['event_id', 'harness', 'model', 'pricing_model', 'provider', 'source', 'tokens', 'ts'];
+    const allowedKeys = requiredKeys.concat(['duration_ms', 'status']);
+    assert.ok(requiredKeys.every((key) => Object.hasOwn(outbound.events[0], key)), 'outbound payload omitted a required key');
+    assert.deepStrictEqual(Object.keys(outbound.events[0]).filter((key) => !allowedKeys.includes(key)), []);
 
     fs.mkdirSync(archiveDir); fs.mkdirSync(extractDir);
     const inventoryResult = await run('npm', [

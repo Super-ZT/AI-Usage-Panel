@@ -4,6 +4,7 @@ state.json
 state.json.migrated
 state.json.*.tmp
 device.json
+enrollment.json
 sync-cursor.json
 events/
 

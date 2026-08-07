@@ -1,5 +1,7 @@
 'use strict';
 
+const { StringDecoder } = require('string_decoder');
+
 /**
  * Extraction of model identity and token usage from LLM API traffic.
  *
@@ -187,6 +189,7 @@ class StreamCapture {
     /** @private */ this._usage = null;
     /** @private */ this._model = null;
     /** @private */ this._bytes = 0;
+    /** @private */ this._decoder = new StringDecoder('utf8');
   }
 
   /**
@@ -196,8 +199,8 @@ class StreamCapture {
    */
   push(chunk) {
     try {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-      this._bytes += Buffer.byteLength(text);
+      const text = typeof chunk === 'string' ? chunk : this._decoder.write(chunk);
+      this._bytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
       this._buffer += text;
 
       // Process complete lines only; retain any trailing partial line.
@@ -238,6 +241,7 @@ class StreamCapture {
    * @returns {{model:string|null, usage:Usage|null, bytes:number}}
    */
   result() {
+    this._buffer += this._decoder.end();
     if (this._buffer.trim()) {
       // Flush a final frame that arrived without a trailing newline.
       const pending = this._buffer;

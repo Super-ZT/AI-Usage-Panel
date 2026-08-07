@@ -725,7 +725,8 @@ function sanitizeEvent(raw, device) {
   }
   const number = (value, name) => {
     if (value == null) return 0;
-    const n = Number(value);
+    if (typeof value !== 'number') throw new Error('invalid token count: ' + name);
+    const n = value;
     const rounded = Math.round(n);
     if (!Number.isFinite(n) || n < 0 || !Number.isSafeInteger(rounded)) {
       throw new Error('invalid token count: ' + name);

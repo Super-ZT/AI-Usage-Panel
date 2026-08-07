@@ -95,22 +95,24 @@ function readBody(req, limitBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    let aborted = false;
+    let settled = false;
+    const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
     req.on('data', (c) => {
-      if (aborted) return;
+      if (settled) return;
       size += c.length;
       if (size > limitBytes) {
-        aborted = true;
         // Drain rather than destroy: tearing down the socket here would stop
         // the 413 from ever reaching the client.
         req.resume();
-        reject(Object.assign(new Error('request body too large'), { statusCode: 413 }));
+        finish(reject, Object.assign(new Error('request body too large'), { statusCode: 413 }));
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => finish(resolve, Buffer.concat(chunks)));
+    req.on('aborted', () => finish(reject, new Error('request aborted')));
+    req.on('close', () => { if (!req.complete) finish(reject, new Error('request closed before completion')); });
+    req.on('error', (err) => finish(reject, err));
   });
 }
 

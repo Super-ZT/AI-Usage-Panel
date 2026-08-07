@@ -23,6 +23,10 @@ trap cleanup EXIT INT TERM
 case "$backup_file" in
   *.age)
     require_secret BACKUP_IDENTITY_FILE
+    case "$BACKUP_IDENTITY_FILE" in /run/secrets/*) ;; *) echo "BACKUP_IDENTITY_FILE must be a mounted container secret" >&2; exit 1 ;; esac
+    [ -f "$BACKUP_IDENTITY_FILE" ] && [ -r "$BACKUP_IDENTITY_FILE" ] || {
+      echo "Backup identity is missing or unreadable" >&2; exit 1;
+    }
     command -v age >/dev/null 2>&1 || { echo "age is required to decrypt this backup" >&2; exit 1; }
     temporary=$(mktemp /tmp/usage-panel-restore.dump.XXXXXX)
     age --decrypt --identity "$BACKUP_IDENTITY_FILE" --output "$temporary" "$backup_file"

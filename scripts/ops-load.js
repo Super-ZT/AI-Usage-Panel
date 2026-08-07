@@ -87,6 +87,16 @@ async function closeServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
+function listenOn(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (err) => { server.off('listening', onListening); reject(err); };
+    const onListening = () => { server.off('error', onError); resolve(); };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, '127.0.0.1');
+  });
+}
+
 (async () => {
   const eventsPerDevice = bounded(process.env.OPS_EVENTS_PER_DEVICE, 100, 1, 200);
   const soakSeconds = bounded(process.env.OPS_SOAK_SECONDS, 2, 1, 30);
@@ -103,7 +113,7 @@ async function closeServer(server) {
       slug: 'load-b', name: 'Load Company B', email: 'load-b@example.test', password: 'load company password b'
     });
     collector = createCollector({ pool, keepPoolOpen: true, rateLimitSecret: 'load-test-rate-secret'.repeat(2) });
-    await new Promise((resolve) => collector.server.listen(0, '127.0.0.1', resolve));
+    await listenOn(collector.server, 0);
     const port = collector.server.address().port;
     const endpoint = 'http://127.0.0.1:' + port;
     const managers = [
@@ -169,7 +179,7 @@ async function closeServer(server) {
     assert.strictEqual(outage.ok, false); assert.strictEqual(outbox.pending().pendingTotal, 1);
 
     collector = createCollector({ pool, keepPoolOpen: true, rateLimitSecret: 'load-test-rate-secret'.repeat(2) });
-    await new Promise((resolve) => collector.server.listen(port, '127.0.0.1', resolve));
+    await listenOn(collector.server, port);
     let recovered;
     let recoveryAttempts = 0;
     while (recoveryAttempts < 5) {
@@ -185,7 +195,7 @@ async function closeServer(server) {
     await pool.end();
     activePool = repository.createPool(process.env.TEST_DATABASE_URL);
     collector = createCollector({ pool: activePool, keepPoolOpen: true, rateLimitSecret: 'load-test-rate-secret'.repeat(2) });
-    await new Promise((resolve) => collector.server.listen(port, '127.0.0.1', resolve));
+    await listenOn(collector.server, port);
     const afterRestart = await request(port, 'GET', '/api/v1/fleet?days=30', null, { cookie: managers[0].cookie });
     assert.strictEqual(afterRestart.status, 200); assert.strictEqual(afterRestart.json.totalEvents, expectedPerCompany + 1);
 

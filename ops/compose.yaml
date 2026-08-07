@@ -168,7 +168,8 @@ services:
       USAGE_PANEL_SECRETS_FILE: /run/secrets/usage-panel-env
       BACKUP_FILE: /backups/${RESTORE_FILE:-usage-panel-RESTORE_FILE_REQUIRED.dump}
       BACKUP_DESTINATION_ENCRYPTED: ${BACKUP_DESTINATION_ENCRYPTED:-0}
-    secrets: [usage-panel-env]
+      BACKUP_IDENTITY_FILE: /run/secrets/backup-identity
+    secrets: [usage-panel-env, backup-identity]
     volumes:
       - ./restore.sh:/ops/restore.sh:ro
       - ./lib/secrets.sh:/ops/lib/secrets.sh:ro
@@ -200,6 +201,8 @@ secrets:
     file: ${USAGE_PANEL_SECRETS_FILE:?set USAGE_PANEL_SECRETS_FILE}
   postgres-password:
     file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE}
+  backup-identity:
+    file: ${BACKUP_IDENTITY_FILE:-/dev/null}
 
 volumes:
   postgres-data:

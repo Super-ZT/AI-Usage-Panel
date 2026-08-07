@@ -18,6 +18,7 @@
 
 const http = require('http');
 const https = require('https');
+const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const outbox = require('./outbox');
 const { identity } = require('../core/device');
@@ -32,6 +33,7 @@ const PRIVATE_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|1
  */
 function validateEndpoint(endpoint, allowInsecure) {
   const url = new URL(endpoint);
+  if (url.search || url.hash) throw new Error('endpoint must not include a query string or fragment');
   if (url.protocol === 'https:') return url;
   if (url.protocol !== 'http:') throw new Error('endpoint must be http(s)');
   if (PRIVATE_HOST.test(url.hostname) || allowInsecure) return url;
@@ -50,6 +52,12 @@ function validateEndpoint(endpoint, allowInsecure) {
  */
 function postJSON(url, body, token, timeoutMs) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
     const payload = Buffer.from(JSON.stringify(body), 'utf8');
     const transport = url.protocol === 'https:' ? https : http;
     const headers = {
@@ -66,15 +74,27 @@ function postJSON(url, body, token, timeoutMs) {
       headers,
       timeout: timeoutMs || 20000
     }, (res) => {
-      let raw = '';
-      res.on('data', (c) => (raw += c));
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_RESPONSE_BYTES) {
+          res.destroy(new Error('collector response too large'));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on('error', (err) => finish(reject, err));
+      res.on('aborted', () => finish(reject, new Error('collector response aborted')));
+      res.on('close', () => { if (!res.complete) finish(reject, new Error('collector response closed early')); });
       res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
         let json = null;
         try { json = JSON.parse(raw); } catch (_) { /* non-JSON response */ }
-        resolve({ status: res.statusCode || 0, json, raw: raw.slice(0, 500) });
+        finish(resolve, { status: res.statusCode || 0, json, raw: raw.slice(0, 500) });
       });
     });
-    req.on('error', reject);
+    req.on('error', (err) => finish(reject, err));
     req.on('timeout', () => { req.destroy(new Error('collector timed out')); });
     req.write(payload);
     req.end();
@@ -223,25 +243,41 @@ async function fetchFleet(config) {
   }
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
     const transport = url.protocol === 'https:' ? https : http;
     const req = transport.request({
       hostname: url.hostname,
       port: url.port || (url.protocol === 'https:' ? 443 : 80),
-      path: url.pathname,
+      path: url.pathname + url.search,
       method: 'GET',
       headers: { authorization: 'Bearer ' + session, 'user-agent': 'usage-panel-sync' },
       timeout: config.timeoutMs || 20000
     }, (res) => {
-      let raw = '';
-      res.on('data', (c) => (raw += c));
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_RESPONSE_BYTES) {
+          res.destroy(new Error('collector response too large'));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on('error', (err) => finish({ ok: false, data: null, message: err.message }));
+      res.on('aborted', () => finish({ ok: false, data: null, message: 'response aborted' }));
+      res.on('close', () => {
+        if (!res.complete) finish({ ok: false, data: null, message: 'response closed before completion' });
+      });
       res.on('end', () => {
-        if (res.statusCode !== 200) return resolve({ ok: false, data: null, message: 'HTTP ' + res.statusCode });
-        try { resolve({ ok: true, data: JSON.parse(raw) }); }
-        catch (_) { resolve({ ok: false, data: null, message: 'invalid response' }); }
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode !== 200) return finish({ ok: false, data: null, message: 'HTTP ' + res.statusCode });
+        try { finish({ ok: true, data: JSON.parse(raw) }); }
+        catch (_) { finish({ ok: false, data: null, message: 'invalid response' }); }
       });
     });
-    req.on('error', (err) => resolve({ ok: false, data: null, message: err.message }));
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, data: null, message: 'timed out' }); });
+    req.on('error', (err) => finish({ ok: false, data: null, message: err.message }));
+    req.on('timeout', () => { req.destroy(); finish({ ok: false, data: null, message: 'timed out' }); });
     req.end();
   });
 }

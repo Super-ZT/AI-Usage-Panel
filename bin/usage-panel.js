@@ -16,7 +16,8 @@ const [, , command, ...rest] = process.argv;
 
 function option(name) {
   const index = rest.indexOf('--' + name);
-  return index >= 0 ? rest[index + 1] : null;
+  const value = index >= 0 ? rest[index + 1] : null;
+  return value && !value.startsWith('--') ? value : null;
 }
 
 async function readCode() {
@@ -25,7 +26,9 @@ async function readCode() {
   }
   let value = '';
   for await (const chunk of process.stdin) value += chunk;
-  return value.replace(/[\r\n]+$/, '');
+  const code = value.replace(/[\r\n]+$/, '').trim();
+  if (!code) throw new Error('enrollment code must not be empty');
+  return code;
 }
 
 async function enroll() {
@@ -104,6 +107,10 @@ switch (command) {
   default:
     if (command && command.startsWith('-')) {
       console.error('unknown option: ' + command + ' (try --help)');
+      process.exit(1);
+    }
+    if (command) {
+      console.error('unknown command: ' + command + ' (try --help)');
       process.exit(1);
     }
     require(path.join(ROOT, 'refresher.js'));

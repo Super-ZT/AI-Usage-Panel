@@ -16,6 +16,18 @@ load_usage_panel_secrets() {
     case "$line" in *=*) ;; *) echo "Invalid secret-file entry" >&2; return 1 ;; esac
     key=${line%%=*}
     value=${line#*=}
+    if [ "$key" = BACKUP_RECIPIENT ] && [ -n "${BACKUP_RECIPIENT:-}" ]; then
+      [ -z "$value" ] || [ "$value" = "$BACKUP_RECIPIENT" ] || {
+        echo "BACKUP_RECIPIENT conflicts with the secret file" >&2; return 1;
+      }
+      continue
+    fi
+    if [ "$key" = BACKUP_IDENTITY_FILE ] && [ -n "${BACKUP_IDENTITY_FILE:-}" ]; then
+      [ -z "$value" ] || [ "$value" = "$BACKUP_IDENTITY_FILE" ] || {
+        echo "BACKUP_IDENTITY_FILE conflicts with the mounted identity path" >&2; return 1;
+      }
+      continue
+    fi
     case "$key" in
       DATABASE_URL|RESTORE_DATABASE_URL|RATE_LIMIT_SECRET|BACKUP_RECIPIENT|BACKUP_IDENTITY_FILE|POSTGRES_HOST|POSTGRES_PORT|POSTGRES_DATABASE|POSTGRES_USER|POSTGRES_PASSWORD|RESTORE_POSTGRES_DATABASE) export "$key=$value" ;;
       *) echo "Unsupported secret-file key: $key" >&2; return 1 ;;

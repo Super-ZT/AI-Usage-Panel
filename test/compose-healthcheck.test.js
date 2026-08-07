@@ -16,6 +16,7 @@ const { spawnSync } = require('child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const composePath = path.join(repoRoot, 'ops', 'compose.yaml');
 const dockerfileSource = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
+const entrypointSource = fs.readFileSync(path.join(repoRoot, 'server', 'container-entrypoint.sh'), 'utf8');
 
 let passed = 0;
 const failures = [];
@@ -85,6 +86,30 @@ test('collector image keeps its server-only PostgreSQL dependency manifest', () 
   assert.strictEqual(serverLock.packages['node_modules/pg'].version, '8.16.3');
 });
 
+test('collector root setup is minimal and always drops to the node user before the server starts', () => {
+  assert.doesNotMatch(dockerfileSource, /^USER node$/m,
+    'the entrypoint needs root only to copy the root-readable mounted secret');
+  assert.match(entrypointSource, /mktemp -d \/tmp\/usage-panel-runtime\.XXXXXX/);
+  assert.match(entrypointSource, /exec runuser -u node -- node/);
+  assert.ok(entrypointSource.indexOf('exec runuser -u node -- node') > entrypointSource.indexOf('chown -R node:node'));
+});
+
+test('backup recipient conflicts fail instead of silently overriding the environment', () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-panel-secret-conflict-'));
+  try {
+    const file = path.join(scratch, 'secrets.env');
+    fs.writeFileSync(file, 'BACKUP_RECIPIENT=age1-file-value\n');
+    const result = spawnSync('sh', ['-c', '. "$1"; load_usage_panel_secrets', 'sh',
+      path.join(repoRoot, 'ops', 'lib', 'secrets.sh')], {
+      encoding: 'utf8', env: { ...process.env, USAGE_PANEL_SECRETS_FILE: file, BACKUP_RECIPIENT: 'age1-env-value' }
+    });
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /BACKUP_RECIPIENT conflicts/);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 const docker = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' });
 if (docker.status === 0) {
   test('docker compose config preserves domain SNI healthcheck for an internal domain', () => {
@@ -93,9 +118,11 @@ if (docker.status === 0) {
       const secrets = path.join(scratch, 'secrets.env');
       const password = path.join(scratch, 'postgres-password');
       const backups = path.join(scratch, 'backups');
+      const identity = path.join(scratch, 'age-identity.txt');
       fs.writeFileSync(secrets, 'DATABASE_URL=postgresql://usage_panel:x@postgres:5432/usage_panel\n');
       fs.writeFileSync(password, 'disposable-compose-password\n');
       fs.mkdirSync(backups);
+      fs.writeFileSync(identity, 'disposable-age-identity\n');
       const env = {
         ...process.env,
         PUBLIC_DOMAIN: 'usage-panel.internal',
@@ -103,12 +130,13 @@ if (docker.status === 0) {
         USAGE_PANEL_SECRETS_FILE: secrets,
         POSTGRES_PASSWORD_FILE: password,
         BACKUP_DIR: backups,
+        BACKUP_IDENTITY_FILE: identity,
         HTTP_BIND: '127.0.0.1:18080',
         HTTPS_BIND: '127.0.0.1:18443',
       };
       const rendered = spawnSync(
         'docker',
-        ['compose', '-f', composePath, 'config'],
+        ['compose', '-f', composePath, '--profile', 'restore', 'config'],
         { encoding: 'utf8', env, cwd: repoRoot }
       );
       assert.strictEqual(rendered.status, 0, rendered.stderr || rendered.stdout);
@@ -122,6 +150,8 @@ if (docker.status === 0) {
       assert.match(out, /https:\/\/\$\$PUBLIC_DOMAIN\/health/);
       assert.doesNotMatch(out, /https:\/\/127\.0\.0\.1\/health/);
       assert.match(out, /host_ip:\s*127\.0\.0\.1/);
+      assert.match(out, /file:\s*[^\n]*age-identity\.txt/);
+      assert.match(out, /target:\s*\/run\/secrets\/backup-identity/);
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
     }

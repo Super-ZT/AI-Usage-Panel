@@ -707,6 +707,8 @@ function grokStale() {
 // quota cost, unlike the completion probe. This drives the ring.
 function grokGet(pathUrl, key, version) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
     const r = https.request({
       hostname: 'cli-chat-proxy.grok.com', path: pathUrl, method: 'GET',
       headers: {
@@ -717,22 +719,30 @@ function grokGet(pathUrl, key, version) {
         'x-grok-client-surface': 'grok-build'
       }, timeout: 15000
     }, (res) => {
-      let b = '';
-      let overflow = false;
+      const chunks = [];
+      let size = 0;
       res.on('data', (c) => {
         // Cap the body: a captive portal or misbehaving endpoint could
         // otherwise stream unbounded HTML into memory on every poll.
-        if (b.length > MAX_RESPONSE_BYTES) { overflow = true; r.destroy(); return; }
-        b += c;
+        size += c.length;
+        if (size > MAX_RESPONSE_BYTES) {
+          finish({ error: 'response too large' });
+          res.destroy(new Error('response too large'));
+          return;
+        }
+        chunks.push(c);
       });
+      res.on('error', (e) => finish({ error: String(e.message || e) }));
+      res.on('aborted', () => finish({ error: 'response aborted' }));
       res.on('end', () => {
-        if (overflow) return resolve({ error: 'response too large' });
-        try { resolve({ status: res.statusCode, json: JSON.parse(b) }); }
-        catch (e) { resolve({ status: res.statusCode, json: null }); }
+        const b = Buffer.concat(chunks).toString('utf8');
+        try { finish({ status: res.statusCode, json: JSON.parse(b) }); }
+        catch (e) { finish({ status: res.statusCode, json: null }); }
       });
     });
-    r.on('error', (e) => resolve({ error: String(e.message || e) }));
-    r.on('timeout', () => { r.destroy(); resolve({ error: 'timeout' }); });
+    r.on('error', (e) => finish({ error: String(e.message || e) }));
+    r.on('timeout', () => { r.destroy(); finish({ error: 'timeout' }); });
+    r.on('close', () => finish({ error: 'request closed before completion' }));
     r.end();
   });
 }
