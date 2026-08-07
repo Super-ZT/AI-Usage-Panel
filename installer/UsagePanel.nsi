@@ -19,7 +19,7 @@ SetCompressor /SOLID lzma
 !define MUI_ICON "..\usage-panel.ico"
 !define MUI_UNICON "..\usage-panel.ico"
 !define MUI_FINISHPAGE_RUN "$WINDIR\System32\wscript.exe"
-!define MUI_FINISHPAGE_RUN_PARAMETERS '"$INSTDIR\open-panel.vbs"'
+!define MUI_FINISHPAGE_RUN_PARAMETERS "$\"$INSTDIR\open-panel.vbs$\""
 !define MUI_FINISHPAGE_RUN_TEXT "Open Usage Panel"
 
 !insertmacro MUI_PAGE_WELCOME
