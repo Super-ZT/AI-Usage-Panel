@@ -211,7 +211,7 @@ try {
   $failure = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
   if (-not (Test-Path $DiagnosticFile)) { throw "sanitized diagnostic file was not written" }
   $diagnostics = Get-Content $DiagnosticFile
-  if ($diagnostics -notmatch " SERVER_FAILED$") { throw "server failure diagnostic was not recorded" }
+  if (-not ($diagnostics -match " SERVER_FAILED$")) { throw "server failure diagnostic was not recorded" }
   foreach ($line in $diagnostics) {
     if ($line -notmatch '^\d{4}-\d{2}-\d{2}T[^ ]+ [A-Z_]+$') {
       throw "launcher diagnostic contained non-status data"
