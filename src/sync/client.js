@@ -41,6 +41,58 @@ function validateEndpoint(endpoint, allowInsecure) {
     + ' — use https, or set sync.allowInsecure to override for a trusted network');
 }
 
+/** Build a collector route while preserving the standalone server's API path. */
+function collectorUrl(endpoint, resource, allowInsecure) {
+  if (!/^[a-z][a-z0-9-]*$/.test(resource)) throw new Error('invalid collector resource');
+  const url = validateEndpoint(endpoint, allowInsecure);
+  const basePath = url.pathname.replace(/\/+$/, '');
+  const apiPath = basePath ? '/v1/' : '/api/v1/';
+  url.pathname = basePath + apiPath + resource;
+  return url;
+}
+
+/** Whether a collector URL uses the Super ZT portal's mounted public contract. */
+function usesPortalContract(url) {
+  return /(?:^|\/)api\/usage-panel\/v1\//.test(url.pathname);
+}
+
+/** Translate Node platform names to the collector's public device contract. */
+function collectorPlatform(platform) {
+  if (platform === 'win32') return 'windows';
+  if (platform === 'darwin') return 'macos';
+  return platform;
+}
+
+/** Translate a local usage fact to the strict Super ZT portal event contract. */
+function portalEvent(event) {
+  const tokens = event.tokens || {};
+  const totalWrite = Math.max(0, Number(tokens.cache_write) || 0);
+  let fiveMinute = Math.max(0, Number(tokens.cache_write_5m) || 0);
+  let oneHour = Math.max(0, Number(tokens.cache_write_1h) || 0);
+  let unresolved = Math.max(0, Number(tokens.cache_write_unresolved) || 0);
+
+  fiveMinute = Math.min(fiveMinute, totalWrite);
+  oneHour = Math.min(oneHour, Math.max(0, totalWrite - fiveMinute));
+  const residual = Math.max(0, totalWrite - fiveMinute - oneHour);
+  if (!fiveMinute && !oneHour && !unresolved) fiveMinute = totalWrite;
+  else unresolved = Math.max(unresolved, residual);
+
+  return {
+    eventId: event.event_id,
+    harness: event.harness,
+    provider: event.provider,
+    model: event.model,
+    source: event.source,
+    inputTokens: Math.max(0, Number(tokens.in) || 0),
+    outputTokens: Math.max(0, Number(tokens.out) || 0),
+    cacheReadTokens: Math.max(0, Number(tokens.cache_read) || 0),
+    cacheWrite5mTokens: fiveMinute,
+    cacheWrite1hTokens: oneHour,
+    cacheWriteUnresolvedTokens: unresolved,
+    occurredAt: event.ts
+  };
+}
+
 /**
  * POST JSON with a timeout.
  *
@@ -120,14 +172,14 @@ async function pushOnce(config) {
 
   let url;
   try {
-    url = validateEndpoint(config.endpoint.replace(/\/$/, '') + '/api/v1/events', !!config.allowInsecure);
+    url = collectorUrl(config.endpoint, 'events', !!config.allowInsecure);
   } catch (err) {
     outbox.markError(err.message);
     return { ok: false, sent: 0, pending: 0, message: err.message };
   }
 
   const { batch, pendingTotal } = outbox.pending({
-    limit: config.batchSize || 500,
+    limit: usesPortalContract(url) ? Math.min(config.batchSize || 200, 200) : (config.batchSize || 500),
     lookbackDays: config.lookbackDays || 45
   });
   if (!batch.length) return { ok: true, sent: 0, pending: 0 };
@@ -138,7 +190,7 @@ async function pushOnce(config) {
     label: localDevice.label,
     platform: localDevice.platform
   };
-  const outboundEvents = batch.map((event) => ({
+  const standaloneEvents = batch.map((event) => ({
     event_id: event.event_id,
     harness: event.harness,
     provider: event.provider,
@@ -150,12 +202,14 @@ async function pushOnce(config) {
     duration_ms: event.duration_ms,
     status: event.status
   }));
+  const portalContract = usesPortalContract(url);
+  const outboundEvents = portalContract ? batch.map(portalEvent) : standaloneEvents;
   let response;
   try {
-    response = await postJSON(url, {
-      device: { id: device.id, label: device.label, platform: device.platform },
-      events: outboundEvents
-    }, credential, config.timeoutMs);
+    const body = portalContract
+      ? { events: outboundEvents }
+      : { device: { id: device.id, label: device.label, platform: device.platform }, events: outboundEvents };
+    response = await postJSON(url, body, credential, config.timeoutMs);
   } catch (err) {
     outbox.markError(err.message);
     return { ok: false, sent: 0, pending: pendingTotal, message: err.message };
@@ -175,13 +229,24 @@ async function pushOnce(config) {
   // Trust the collector's own list of accepted ids when it supplies one, so a
   // partial acceptance does not mark unsent events as delivered.
   const batchIds = new Set(batch.map((event) => event.event_id));
-  const acceptedIds = [...new Set((response.json && Array.isArray(response.json.accepted)
-    ? response.json.accepted
-    : batch.map((e) => e.event_id))
+  const outcomes = response.json && Array.isArray(response.json.outcomes) ? response.json.outcomes : null;
+  if (portalContract && !outcomes) {
+    const message = 'collector returned an invalid response';
+    outbox.markError(message);
+    return { ok: false, sent: 0, pending: pendingTotal, message };
+  }
+  const acceptedIds = [...new Set((outcomes
+    ? outcomes.filter((entry) => entry && (entry.status === 'accepted' || entry.status === 'duplicate'))
+      .map((entry) => entry.eventId)
+    : response.json && Array.isArray(response.json.accepted)
+      ? response.json.accepted
+      : batch.map((e) => e.event_id))
     .filter((id) => batchIds.has(id)))];
   const acceptedSet = new Set(acceptedIds);
-  const rejectedIds = [...new Set((response.json && Array.isArray(response.json.permanentlyRejected)
-    ? response.json.permanentlyRejected
+  const rejectedIds = [...new Set((outcomes
+    ? outcomes.filter((entry) => entry && entry.status === 'rejected').map((entry) => entry.eventId)
+    : response.json && Array.isArray(response.json.permanentlyRejected)
+      ? response.json.permanentlyRejected
       .map((entry) => {
         if (typeof entry === 'string') return entry;
         if (!entry || typeof entry !== 'object') return null;
@@ -237,7 +302,7 @@ async function fetchFleet(config) {
   }
   let url;
   try {
-    url = validateEndpoint(config.endpoint.replace(/\/$/, '') + '/api/v1/fleet', !!config.allowInsecure);
+    url = collectorUrl(config.endpoint, 'fleet', !!config.allowInsecure);
   } catch (err) {
     return { ok: false, data: null, message: err.message };
   }
@@ -285,17 +350,22 @@ async function fetchFleet(config) {
 /** Enroll this installation with a short-lived, one-use company code. */
 async function enroll(config) {
   if (!config || !config.endpoint || !config.code) throw new Error('endpoint and enrollment code are required');
-  const url = validateEndpoint(config.endpoint.replace(/\/$/, '') + '/api/v1/enroll', !!config.allowInsecure);
+  const url = collectorUrl(config.endpoint, 'enroll', !!config.allowInsecure);
   const response = await postJSON(url, {
     code: config.code,
     label: config.label || identity().label,
-    platform: config.platform || identity().platform
+    platform: collectorPlatform(config.platform || identity().platform)
   }, null, config.timeoutMs);
   const credential = response.json && (response.json.deviceCredential || response.json.credential);
   if (response.status !== 201 || !response.json || !credential || !response.json.deviceId) {
-    throw new Error(response.status === 401 ? 'invalid or expired enrollment code' : 'enrollment failed');
+    throw new Error(response.status === 401 || response.status === 404
+      ? 'invalid or expired enrollment code'
+      : 'enrollment failed (HTTP ' + response.status + ')');
   }
   return Object.assign({}, response.json, { deviceCredential: credential });
 }
 
-module.exports = { push, pushOnce, fetchFleet, enroll, validateEndpoint };
+module.exports = {
+  push, pushOnce, fetchFleet, enroll, validateEndpoint, collectorUrl, collectorPlatform,
+  usesPortalContract, portalEvent
+};
