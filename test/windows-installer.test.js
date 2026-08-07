@@ -55,6 +55,9 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(uninstallHelper, /\.usage-panel-stop/);
   assert.match(uninstallHelper, /Stop-Process/);
   assert.match(uninstallHelper, /start-panel\.cmd/);
+  assert.match(uninstallHelper, /open-panel\.cmd/);
+  assert.match(uninstallHelper, /StringComparison\]::OrdinalIgnoreCase/);
+  assert.match(uninstallHelper, /Stop-Process -Id \$_\.ProcessId -Force/);
   assert.match(uninstallHelper, /Start-Sleep -Milliseconds 100/);
 
   const opener = read('open-panel.cmd');
