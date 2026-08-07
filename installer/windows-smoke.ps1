@@ -47,6 +47,14 @@ function Wait-PanelStopped {
   throw "Usage Panel did not stop between launch tests."
 }
 
+function Wait-AppStopped {
+  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    if (-not (Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue)) { return }
+    Start-Sleep -Milliseconds 200
+  }
+  throw "Usage Panel app process did not stop between launch tests."
+}
+
 function Wait-VisibleWindow {
   param([string]$Title = "Usage Panel", [int]$Attempts = 100)
   for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
@@ -183,6 +191,7 @@ Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:t
 # A server child that exits must leave a visible plain-English failure instead
 # of disappearing like v1.0.2. No dynamic exception, path, or identity is logged.
 & (Join-Path $InstallDir "uninstall-helper.ps1")
+Wait-AppStopped
 Wait-PanelStopped
 $refresher = Join-Path $InstallDir "refresher.js"
 $disabledRefresher = Join-Path $InstallDir "refresher.js.disabled"
@@ -203,6 +212,7 @@ try {
   Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force
   Move-Item $disabledRefresher $refresher -Force
   & (Join-Path $InstallDir "uninstall-helper.ps1")
+  Wait-AppStopped
   Wait-PanelStopped
 }
 

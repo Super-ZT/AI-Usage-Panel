@@ -82,6 +82,7 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(uninstallHelper, /Stop-Process/);
   assert.match(uninstallHelper, /start-panel\.cmd/);
   assert.match(uninstallHelper, /Get-Process -Name "UsagePanel"/);
+  assert.match(uninstallHelper, /Wait-Process -Timeout 5/);
   assert.doesNotMatch(uninstallHelper, /open-panel\.cmd/);
   assert.match(uninstallHelper, /StringComparison\]::OrdinalIgnoreCase/);
   assert.match(uninstallHelper, /Stop-Process -Id \$_\.ProcessId -Force/);

@@ -2,8 +2,9 @@ $ErrorActionPreference = "SilentlyContinue"
 $StopFile = Join-Path $PSScriptRoot ".usage-panel-stop"
 "stop" | Set-Content $StopFile -Encoding ascii -NoNewline
 
-Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue |
-  ForEach-Object { Stop-Process -Id $_.Id -Force }
+$AppProcesses = @(Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue)
+$AppProcesses | ForEach-Object { Stop-Process -Id $_.Id -Force }
+$AppProcesses | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
 
 $NodePath = (Join-Path $PSScriptRoot "node\node.exe").ToLowerInvariant()
 Get-CimInstance Win32_Process | Where-Object {
