@@ -19,7 +19,7 @@ are deliberately excluded.
 
 The installer includes its own Node.js runtime, creates Desktop and Start Menu
 shortcuts, and adds a normal Windows uninstaller. Customers do **not** install
-Node.js and do not use a terminal. Version 1.0.2 is unsigned, so Windows
+Node.js and do not use a terminal. Version 1.0.3 is unsigned, so Windows
 SmartScreen may show **Unknown publisher**; compare the download against the
 published `.sha256` file if you want to verify its bytes.
 
@@ -88,6 +88,12 @@ rather than exposed in the process command line. After linking, the prompt says
 **Linked. Opening Usage Panel...**, closes without a second confirmation, and
 opens the main dashboard automatically. This also applies when linking from the
 Start Menu shortcut.
+
+Version 1.0.3 replaces the hidden script-and-browser launcher with a real
+Windows application window. The app stays visible while the local dashboard
+starts and shows a plain-English error if a child process fails. Its bounded
+diagnostic file records only fixed startup status names; it never records
+account names, local paths, one-time codes, credentials, prompts, or tokens.
 
 Advanced source installs can perform the same enrollment non-interactively:
 

@@ -10,6 +10,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
 
 (async () => {
   const required = [
+    'app/UsagePanel.csproj',
+    'app/host.cs',
     'installer/UsagePanel.nsi',
     'installer/build-windows.ps1',
     'installer/windows-smoke.ps1',
@@ -24,12 +26,17 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   }
 
   const nsi = read('installer/UsagePanel.nsi');
-  assert.match(nsi, /!define VERSION "1\.0\.2"/);
+  assert.match(nsi, /!define VERSION "1\.0\.3"/);
   assert.match(nsi, /RequestExecutionLevel user/);
   assert.match(nsi, /UsagePanel-Setup-\$\{VERSION\}\.exe/);
   assert.ok(nsi.indexOf('SetShellVarContext current') < nsi.indexOf('CreateShortCut "$DESKTOP\\Usage Panel.lnk"'),
     'shortcuts must resolve through the current user shell folders');
-  assert.match(nsi, /CreateShortCut "\$DESKTOP\\Usage Panel\.lnk"/);
+  assert.match(nsi, /CreateShortCut "\$DESKTOP\\Usage Panel\.lnk"[^\n]+UsagePanel\.exe/);
+  assert.match(nsi, /CreateShortCut "\$SMPROGRAMS\\Usage Panel\\Usage Panel\.lnk"[^\n]+UsagePanel\.exe/);
+  assert.doesNotMatch(nsi, /Usage Panel\.lnk"[^\n]+wscript\.exe/i,
+    'the customer launcher must be a visible application, not a hidden script');
+  assert.match(nsi, /Delete "\$INSTDIR\\\.usage-panel-stop"/,
+    'install and upgrade must clear any stale shutdown marker');
   assert.match(nsi, /CreateDirectory "\$SMPROGRAMS\\Usage Panel"/);
   assert.match(nsi, /Link this computer\.lnk[^\n]+enroll-panel\.ps1[^\n]+-OpenPanelAfterLink/);
   assert.match(nsi, /WriteUninstaller/);
@@ -41,6 +48,22 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(build, /57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73/);
   assert.match(build, /Get-FileHash[^\n]+SHA256/i);
   assert.match(build, /makensis/i);
+  assert.match(build, /dotnet[\s\S]+publish[\s\S]+UsagePanel\.csproj/i);
+  assert.match(build, /UsagePanel\.exe/);
+
+  const host = read('app/host.cs');
+  assert.match(host, /http:\/\/127\.0\.0\.1:8899/,
+    'the application must use the same explicit IPv4 address the server binds');
+  assert.match(host, /Application\.Run\(/,
+    'the application must own a visible top-level window');
+  assert.match(host, /MainWindowTitle/,
+    'the application must expose a stable title for visible-window verification');
+  assert.match(host, /launcher\.log/);
+  assert.match(host, /SERVER_FAILED/);
+  assert.match(host, /MessageBox|failureLabel/i,
+    'startup failure must remain visible in plain English');
+  assert.doesNotMatch(host, /WriteAllText\([^\n]+(?:UserName|UserProfile|code|credential|token)/i,
+    'launcher diagnostics must not record identities or secrets');
 
   const start = read('start-panel.cmd');
   const bundled = start.indexOf('node\\node.exe');
@@ -58,22 +81,12 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(uninstallHelper, /\.usage-panel-stop/);
   assert.match(uninstallHelper, /Stop-Process/);
   assert.match(uninstallHelper, /start-panel\.cmd/);
-  assert.match(uninstallHelper, /open-panel\.cmd/);
+  assert.match(uninstallHelper, /Get-Process -Name "UsagePanel"/);
+  assert.match(uninstallHelper, /Wait-Process -Timeout 5/);
+  assert.doesNotMatch(uninstallHelper, /open-panel\.cmd/);
   assert.match(uninstallHelper, /StringComparison\]::OrdinalIgnoreCase/);
   assert.match(uninstallHelper, /Stop-Process -Id \$_\.ProcessId -Force/);
   assert.match(uninstallHelper, /Start-Sleep -Milliseconds 100/);
-
-  const opener = read('open-panel.cmd');
-  assert.match(opener, /enrollment\.json/);
-  assert.match(opener, /enroll-panel\.ps1/);
-  assert.doesNotMatch(opener, /enroll-panel\.ps1"\s+-OpenPanelAfterLink/,
-    'the first-run parent launcher must remain the sole dashboard opener');
-  assert.match(opener, /Program Files\\Microsoft\\Edge/);
-  assert.match(opener, /cd \/d "%TEMP%"/);
-  assert.doesNotMatch(opener, /cd \/d "%~dp0"/,
-    'launcher children must not inherit the install directory as their working directory');
-  assert.ok(opener.indexOf('cd /d "%TEMP%"') < opener.indexOf('start "" wscript.exe'),
-    'the server launcher must inherit a safe working directory');
 
   const enrollUi = read('enroll-panel.ps1');
   assert.match(enrollUi, /param\([\s\S]*\[switch\]\$OpenPanelAfterLink[\s\S]*\)/);
@@ -89,8 +102,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.doesNotMatch(enrollUi, /Write-(?:Host|Output).*code/i);
 
   const handoff = read('open-panel-after-link.ps1');
-  assert.match(handoff, /open-panel\.vbs/);
-  assert.match(handoff, /wscript\.exe/i);
+  assert.match(handoff, /UsagePanel\.exe/);
+  assert.doesNotMatch(handoff, /open-panel\.vbs|wscript\.exe/i);
   assert.match(handoff, /Start-Process/);
   assert.match(handoff, /GetTempPath/);
   assert.doesNotMatch(handoff, /-WorkingDirectory \$AppRoot/);
@@ -99,7 +112,9 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   const workflow = read('.github/workflows/windows-installer.yml');
   assert.match(workflow, /runs-on:\s*windows-latest/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
-  assert.match(workflow, /UsagePanel-Setup-1\.0\.2/);
+  assert.match(workflow, /UsagePanel-Setup-1\.0\.3/);
+  assert.match(workflow, /UsagePanel-Setup-1\.0\.2\.exe/,
+    'Windows CI must exercise the exact failed public baseline');
   assert.match(workflow, /\.\/installer\/windows-smoke\.ps1/);
 
   const windowsSmoke = read('installer/windows-smoke.ps1');
@@ -110,17 +125,22 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /Arguments/);
   assert.match(windowsSmoke, /open-panel-after-link\.ps1/);
   assert.match(windowsSmoke, /api\/sync/);
-  assert.match(windowsSmoke, /Remove-Item[^\n]+\.usage-panel-stop/);
+  assert.match(windowsSmoke, /MainWindowHandle/);
+  assert.match(windowsSmoke, /IsWindowVisible/);
+  assert.match(windowsSmoke, /Usage Panel - Could not open/);
+  assert.match(windowsSmoke, /-not \(\$diagnostics -match " SERVER_FAILED\$"\)/,
+    'the status-array assertion must pass when any diagnostic line records the failure');
+  assert.match(windowsSmoke, /baseline_v102_silent_launcher_reproduced/);
+  assert.match(windowsSmoke, /visible_window_ok/);
   assert.match(windowsSmoke, /function Wait-PathRemoved/);
   assert.match(windowsSmoke, /Wait-PathRemoved -Path \$InstallDir/);
-  assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
+  assert.match(windowsSmoke, /panel_visible_launch_diagnostics_shortcuts_uninstall_ok/);
   assert.match(windowsSmoke, /uninstall_residual=/);
-  assert.match(windowsSmoke, /uninstall_holder=/);
   assert.doesNotMatch(windowsSmoke, /\$Path:/,
     'PowerShell variables immediately before a colon must use braced syntax');
 
   const packageJson = JSON.parse(read('package.json'));
-  assert.strictEqual(packageJson.version, '1.0.2');
+  assert.strictEqual(packageJson.version, '1.0.3');
 
   const sync = require('../src/sync/client');
   const syncSource = read('src/sync/client.js');
