@@ -1,4 +1,9 @@
-# Usage Panel 1.0.0 for Windows
+# Usage Panel 1.0.1 for Windows
+
+This hotfix makes the Windows app's enrollment and event-upload requests match
+the Super ZT website's URLs and data contract, including the website's Windows
+platform name. Version 1.0.0 installed successfully but could not link a
+computer because its request did not match that contract.
 
 This package is the consumer installer for Windows 10 and Windows 11.
 
@@ -12,7 +17,7 @@ This package is the consumer installer for Windows 10 and Windows 11.
 
 ## Install
 
-1. Download `UsagePanel-Setup-1.0.0.exe`.
+1. Download `UsagePanel-Setup-1.0.1.exe`.
 2. Double-click it and follow the installer.
 3. Open **Usage Panel** from the Desktop or Start Menu.
 4. Paste the one-time link code from <https://super-zt.com/portal/usage-panel> when prompted.
@@ -27,4 +32,4 @@ Uninstalling removes the application and shortcuts. It intentionally leaves per-
 
 ## Signing status
 
-Version 1.0.0 is **unsigned**. Super ZT has not purchased a Windows code-signing certificate for this first release. Windows SmartScreen may show an “Unknown publisher” warning. The published SHA-256 file lets customers verify the downloaded bytes. No certificate purchase was made for this release.
+Version 1.0.1 is **unsigned**. Super ZT has not purchased a Windows code-signing certificate. Windows SmartScreen may show an “Unknown publisher” warning. The published SHA-256 file lets customers verify the downloaded bytes. No certificate purchase was made for this release.

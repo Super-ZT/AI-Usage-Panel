@@ -64,18 +64,22 @@ function allFiles(directory, prefix = '') {
   const server = http.createServer(async (req, res) => {
     try {
       const raw = await readBody(req);
-      if (req.url === '/api/v1/enroll') {
+      if (req.url === '/api/usage-panel/v1/enroll') {
         const body = JSON.parse(raw);
         assert.strictEqual(body.code, 'sentinel-one-use-code');
+        assert.strictEqual(body.platform, process.platform === 'win32' ? 'windows' : process.platform);
         res.writeHead(201, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ deviceCredential: credentialSentinel, deviceId: deviceSentinel }));
+        res.end(JSON.stringify({ credential: credentialSentinel, deviceId: deviceSentinel }));
         return;
       }
-      if (req.url === '/api/v1/events') {
+      if (req.url === '/api/usage-panel/v1/events') {
         uploaded = raw;
         const body = JSON.parse(raw);
+        assert.deepStrictEqual(Object.keys(body), ['events']);
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ accepted: body.events.map((event) => event.event_id) }));
+        res.end(JSON.stringify({
+          outcomes: body.events.map((event) => ({ eventId: event.eventId, status: 'accepted' }))
+        }));
         return;
       }
       res.writeHead(404); res.end();
@@ -86,7 +90,7 @@ function allFiles(directory, prefix = '') {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
-    const endpoint = 'http://127.0.0.1:' + server.address().port;
+    const endpoint = 'http://127.0.0.1:' + server.address().port + '/api/usage-panel';
     const enrolled = await run(process.execPath, [
       'bin/usage-panel.js', 'enroll', '--endpoint', endpoint, '--code-stdin',
       '--allow-insecure', '--label', 'release-sentinel-device'
@@ -136,8 +140,12 @@ function allFiles(directory, prefix = '') {
       assert.ok(!uploaded.includes(forbidden), 'outbound payload leaked ' + forbidden);
     }
     const outbound = JSON.parse(uploaded);
-    const requiredKeys = ['event_id', 'harness', 'model', 'pricing_model', 'provider', 'source', 'tokens', 'ts'];
-    const allowedKeys = requiredKeys.concat(['duration_ms', 'status']);
+    const requiredKeys = [
+      'eventId', 'harness', 'provider', 'model', 'source', 'inputTokens', 'outputTokens',
+      'cacheReadTokens', 'cacheWrite5mTokens', 'cacheWrite1hTokens',
+      'cacheWriteUnresolvedTokens', 'occurredAt'
+    ];
+    const allowedKeys = requiredKeys;
     assert.ok(requiredKeys.every((key) => Object.hasOwn(outbound.events[0], key)), 'outbound payload omitted a required key');
     assert.deepStrictEqual(Object.keys(outbound.events[0]).filter((key) => !allowedKeys.includes(key)), []);
 

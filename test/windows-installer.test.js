@@ -59,12 +59,77 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(workflow, /UsagePanel-Setup-/);
 
   const sync = require('../src/sync/client');
+  const syncSource = read('src/sync/client.js');
+  assert.strictEqual(
+    sync.collectorUrl('https://super-zt.com/api/usage-panel', 'enroll').href,
+    'https://super-zt.com/api/usage-panel/v1/enroll',
+    'the Windows endpoint must match the mounted Super ZT enrollment route'
+  );
+  assert.strictEqual(
+    sync.collectorUrl('https://super-zt.com/api/usage-panel', 'events').href,
+    'https://super-zt.com/api/usage-panel/v1/events',
+    'event uploads must use the same mounted Super ZT route'
+  );
+  assert.strictEqual(
+    sync.collectorUrl('https://super-zt.com/api/usage-panel', 'fleet').href,
+    'https://super-zt.com/api/usage-panel/v1/fleet',
+    'fleet requests must use the same mounted Super ZT route'
+  );
+  assert.strictEqual(
+    sync.collectorUrl('https://collector.example.com', 'enroll').href,
+    'https://collector.example.com/api/v1/enroll',
+    'standalone collector endpoints must keep their existing API path'
+  );
+  assert.strictEqual(
+    sync.collectorUrl('https://collector.example.com/mounted', 'events').href,
+    'https://collector.example.com/mounted/v1/events',
+    'mounted collectors append v1 directly to their configured path'
+  );
+  assert.strictEqual(sync.collectorPlatform('win32'), 'windows');
+  assert.strictEqual(sync.collectorPlatform('darwin'), 'macos');
+  assert.strictEqual(sync.collectorPlatform('linux'), 'linux');
+  assert.doesNotMatch(syncSource, /api\/usage-panel\/api\/v1\//);
+  assert.deepStrictEqual(sync.portalEvent({
+    event_id: 'portal-event-1',
+    harness: 'claude-code',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4.5',
+    source: 'local-jsonl',
+    ts: '2026-08-07T00:00:00.000Z',
+    tokens: {
+      in: 10, out: 2, cache_read: 3, cache_write: 7,
+      cache_write_5m: 2, cache_write_1h: 5, cache_write_unresolved: 0
+    }
+  }), {
+    eventId: 'portal-event-1',
+    harness: 'claude-code',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4.5',
+    source: 'local-jsonl',
+    inputTokens: 10,
+    outputTokens: 2,
+    cacheReadTokens: 3,
+    cacheWrite5mTokens: 2,
+    cacheWrite1hTokens: 5,
+    cacheWriteUnresolvedTokens: 0,
+    occurredAt: '2026-08-07T00:00:00.000Z'
+  });
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (chunk) => { raw += chunk; });
     req.on('end', () => {
       const body = JSON.parse(raw);
       assert.strictEqual(req.url, '/api/v1/enroll');
+      if (body.code === 'expired-code') {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not found' }));
+        return;
+      }
+      if (body.code === 'service-error-code') {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unavailable' }));
+        return;
+      }
       assert.strictEqual(body.code, 'one-time-code');
       res.writeHead(201, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
@@ -82,6 +147,16 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     });
     assert.strictEqual(result.deviceCredential, 'server-shape-credential');
     assert.strictEqual(result.deviceId, '11111111-1111-4111-8111-111111111111');
+    await assert.rejects(sync.enroll({
+      endpoint: 'http://127.0.0.1:' + server.address().port,
+      code: 'expired-code',
+      label: 'Windows PC'
+    }), /^Error: invalid or expired enrollment code$/);
+    await assert.rejects(sync.enroll({
+      endpoint: 'http://127.0.0.1:' + server.address().port,
+      code: 'service-error-code',
+      label: 'Windows PC'
+    }), /^Error: enrollment failed \(HTTP 503\)$/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -99,6 +99,7 @@ switch (command) {
       '  usage-panel             start the dashboard (http://localhost:8899)',
       '  usage-panel detect      list harnesses detected on this machine',
       '  usage-panel enroll --endpoint URL --code-stdin [--label NAME]',
+      '                          endpoints with a path use /v1; bare origins use /api/v1',
       '  usage-panel --version',
       ''
     ].join('\n'));

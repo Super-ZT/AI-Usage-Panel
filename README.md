@@ -19,7 +19,7 @@ are deliberately excluded.
 
 The installer includes its own Node.js runtime, creates Desktop and Start Menu
 shortcuts, and adds a normal Windows uninstaller. Customers do **not** install
-Node.js and do not use a terminal. Version 1.0.0 is unsigned, so Windows
+Node.js and do not use a terminal. Version 1.0.1 is unsigned, so Windows
 SmartScreen may show **Unknown publisher**; compare the download against the
 published `.sha256` file if you want to verify its bytes.
 
