@@ -2,7 +2,9 @@
 REM Usage Panel — starts the local server and restarts it if it exits.
 REM Locates Node automatically; no machine-specific paths.
 setlocal
-cd /d "%~dp0"
+REM The bundled script and runtime use absolute paths. Keep this long-lived
+REM launcher out of the install directory so it cannot lock that folder.
+cd /d "%TEMP%"
 
 set "NODE_EXE="
 set "STOP_FILE=%~dp0.usage-panel-stop"

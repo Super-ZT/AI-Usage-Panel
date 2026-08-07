@@ -48,6 +48,9 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.ok(bundled >= 0 && pathLookup >= 0 && bundled < pathLookup,
     'bundled Node must be preferred over a machine-wide Node installation');
   assert.match(start, /STOP_FILE=.*\.usage-panel-stop/);
+  assert.match(start, /cd \/d "%TEMP%"/);
+  assert.doesNotMatch(start, /cd \/d "%~dp0"/,
+    'the long-lived refresher launcher must not lock the install directory');
   assert.ok((start.match(/if exist "%STOP_FILE%" exit \/b 0/g) || []).length >= 2,
     'the restart loop must stop both before launch and after Node is terminated');
 
@@ -66,8 +69,11 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.doesNotMatch(opener, /enroll-panel\.ps1"\s+-OpenPanelAfterLink/,
     'the first-run parent launcher must remain the sole dashboard opener');
   assert.match(opener, /Program Files\\Microsoft\\Edge/);
-  assert.ok(opener.indexOf('cd /d "%TEMP%"') < opener.indexOf('Program Files\\Microsoft\\Edge'),
-    'browser processes must not inherit the installation directory');
+  assert.match(opener, /cd \/d "%TEMP%"/);
+  assert.doesNotMatch(opener, /cd \/d "%~dp0"/,
+    'launcher children must not inherit the install directory as their working directory');
+  assert.ok(opener.indexOf('cd /d "%TEMP%"') < opener.indexOf('start "" wscript.exe'),
+    'the server launcher must inherit a safe working directory');
 
   const enrollUi = read('enroll-panel.ps1');
   assert.match(enrollUi, /param\([\s\S]*\[switch\]\$OpenPanelAfterLink[\s\S]*\)/);
