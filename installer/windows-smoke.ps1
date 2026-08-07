@@ -46,7 +46,7 @@ function Assert-Shortcut {
   try {
     $shortcut = $shell.CreateShortcut($Path)
     if ([IO.Path]::GetFileName($shortcut.TargetPath) -ine $TargetLeaf) {
-      throw "unexpected shortcut target for $Path: $($shortcut.TargetPath)"
+      throw "unexpected shortcut target for ${Path}: $($shortcut.TargetPath)"
     }
     foreach ($fragment in $ArgumentFragments) {
       if ($shortcut.Arguments -notlike "*$fragment*") {

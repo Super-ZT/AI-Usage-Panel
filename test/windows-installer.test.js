@@ -89,6 +89,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /open-panel-after-link\.ps1/);
   assert.match(windowsSmoke, /api\/sync/);
   assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
+  assert.doesNotMatch(windowsSmoke, /\$Path:/,
+    'PowerShell variables immediately before a colon must use braced syntax');
 
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.version, '1.0.2');
