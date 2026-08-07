@@ -35,6 +35,14 @@ function Wait-PanelStopped {
   throw "Usage Panel did not stop between launch tests."
 }
 
+function Wait-PathRemoved {
+  param([string]$Path)
+  for ($attempt = 0; $attempt -lt 50; $attempt++) {
+    if (-not (Test-Path $Path)) { return }
+    Start-Sleep -Milliseconds 200
+  }
+}
+
 function Assert-Shortcut {
   param(
     [string]$Path,
@@ -100,6 +108,9 @@ Wait-PanelReady
 $Uninstaller = Join-Path $InstallDir "Uninstall.exe"
 $uninstall = Start-Process $Uninstaller -ArgumentList "/S" -Wait -PassThru
 if ($uninstall.ExitCode -ne 0) { throw "uninstaller exited $($uninstall.ExitCode)" }
+# NSIS may hand final self-deletion to a short-lived cleanup process after the
+# main uninstaller exits, so allow that bounded handoff to finish.
+Wait-PathRemoved -Path $InstallDir
 if (Test-Path $InstallDir) {
   Get-ChildItem $InstallDir -Recurse -Force -ErrorAction SilentlyContinue |
     ForEach-Object { Write-Host "uninstall_residual=$($_.FullName.Substring($InstallDir.Length))" }

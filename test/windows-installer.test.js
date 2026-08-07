@@ -105,6 +105,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /open-panel-after-link\.ps1/);
   assert.match(windowsSmoke, /api\/sync/);
   assert.match(windowsSmoke, /Remove-Item[^\n]+\.usage-panel-stop/);
+  assert.match(windowsSmoke, /function Wait-PathRemoved/);
+  assert.match(windowsSmoke, /Wait-PathRemoved -Path \$InstallDir/);
   assert.match(windowsSmoke, /panel_launch_handoff_shortcuts_uninstall_ok/);
   assert.match(windowsSmoke, /uninstall_residual=/);
   assert.match(windowsSmoke, /uninstall_holder=/);
