@@ -1,7 +1,7 @@
 !include "MUI2.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.0.1"
+  !define VERSION "1.0.2"
 !endif
 !ifndef OUTPUT_DIR
   !define OUTPUT_DIR "..\dist"
@@ -48,7 +48,7 @@ Section "Usage Panel" SEC_MAIN
   CreateDirectory "$SMPROGRAMS\Usage Panel"
   CreateShortCut "$DESKTOP\Usage Panel.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\open-panel.vbs"' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Usage Panel\Usage Panel.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\open-panel.vbs"' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
-  CreateShortCut "$SMPROGRAMS\Usage Panel\Link this computer.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\enroll-panel.ps1"' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$SMPROGRAMS\Usage Panel\Link this computer.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\enroll-panel.ps1" -OpenPanelAfterLink' "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Usage Panel\Uninstall Usage Panel.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 

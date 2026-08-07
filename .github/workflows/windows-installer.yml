@@ -25,38 +25,17 @@ jobs:
         run: choco install nsis --no-progress -y
       - name: Build Setup.exe with bundled Node
         shell: powershell
-        run: ./installer/build-windows.ps1 -Version 1.0.1
-      - name: Smoke-test silent install and uninstall
+        run: ./installer/build-windows.ps1 -Version 1.0.2
+      - name: Smoke-test launch handoff, shortcuts, and uninstall
         shell: powershell
-        run: |
-          $installer = Resolve-Path "dist/UsagePanel-Setup-1.0.1.exe"
-          $process = Start-Process $installer -ArgumentList "/S" -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "installer exited $($process.ExitCode)" }
-          $installDir = Join-Path $env:LOCALAPPDATA "Programs/Usage Panel"
-          $required = @(
-            (Join-Path $installDir "node/node.exe"),
-            (Join-Path $installDir "open-panel.vbs"),
-            (Join-Path $installDir "enroll-panel.ps1"),
-            (Join-Path $env:USERPROFILE "Desktop/Usage Panel.lnk"),
-            (Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/Usage Panel/Usage Panel.lnk"),
-            (Join-Path $installDir "Uninstall.exe")
-          )
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) { throw "missing after install: $path" }
-          }
-          & (Join-Path $installDir "node/node.exe") --version
-          $uninstaller = Join-Path $installDir "Uninstall.exe"
-          $process = Start-Process $uninstaller -ArgumentList "/S" -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "uninstaller exited $($process.ExitCode)" }
-          if (Test-Path $installDir) { throw "install directory remained after uninstall" }
-          Write-Host "installer_smoke=install_shortcuts_runtime_uninstall_ok"
+        run: ./installer/windows-smoke.ps1 -Version 1.0.2
       - name: Publish installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UsagePanel-Setup-1.0.1
+          name: UsagePanel-Setup-1.0.2
           path: |
-            dist/UsagePanel-Setup-1.0.1.exe
-            dist/UsagePanel-Setup-1.0.1.exe.sha256
+            dist/UsagePanel-Setup-1.0.2.exe
+            dist/UsagePanel-Setup-1.0.2.exe.sha256
             installer/RELEASE_NOTES.md
           if-no-files-found: error
           retention-days: 30

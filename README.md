@@ -19,7 +19,7 @@ are deliberately excluded.
 
 The installer includes its own Node.js runtime, creates Desktop and Start Menu
 shortcuts, and adds a normal Windows uninstaller. Customers do **not** install
-Node.js and do not use a terminal. Version 1.0.1 is unsigned, so Windows
+Node.js and do not use a terminal. Version 1.0.2 is unsigned, so Windows
 SmartScreen may show **Unknown publisher**; compare the download against the
 published `.sha256` file if you want to verify its bytes.
 
@@ -84,7 +84,10 @@ The Windows app prompts on first launch when the computer is not yet linked.
 Create a one-time code at <https://super-zt.com/portal/usage-panel>, paste it
 into the prompt, and choose **Link computer**. Enrollment goes only to the fixed
 Super ZT HTTPS endpoint, and the one-time code is piped through standard input
-rather than exposed in the process command line.
+rather than exposed in the process command line. After linking, the prompt says
+**Linked. Opening Usage Panel...**, closes without a second confirmation, and
+opens the main dashboard automatically. This also applies when linking from the
+Start Menu shortcut.
 
 Advanced source installs can perform the same enrollment non-interactively:
 

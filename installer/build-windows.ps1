@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "1.0.1"
+  [string]$Version = "1.0.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +27,7 @@ $clientFiles = @(
   "start-hidden.vbs",
   "open-panel.cmd",
   "open-panel.vbs",
+  "open-panel-after-link.ps1",
   "enroll-panel.ps1",
   "uninstall-helper.ps1"
 )
