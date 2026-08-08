@@ -458,7 +458,9 @@ function grokEvent(line, deviceId, streamId, model, runtime) {
 
   const timestamp = new Date(Number(timeMatch[1]) * 1000);
   if (isNaN(timestamp.getTime())) return null;
-  const resolvedModel = model || 'grok-4.5';
+  // Never invent a model id. Only summary.current_model_id (or an explicit
+  // caller-supplied value) is a fact; silence becomes "unknown".
+  const resolvedModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'unknown';
   return {
     event_id: stableId(['grok', deviceId, streamId, timestamp.toISOString(), resolvedModel, current].join('|')),
     device_id: deviceId,
@@ -542,7 +544,9 @@ async function bridge(options) {
       try { return JSON.parse(fs.readFileSync(path.join(path.dirname(file), 'summary.json'), 'utf8')); }
       catch (_) { return null; }
     })();
-    const model = summary && summary.current_model_id ? String(summary.current_model_id) : 'grok-4.5';
+    const model = summary && typeof summary.current_model_id === 'string' && summary.current_model_id.trim()
+      ? String(summary.current_model_id).trim()
+      : null;
     scan(file, 'grok', (line, runtime) => append(grokEvent(line, deviceId, streamId, model, runtime)));
   }
 

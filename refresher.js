@@ -1028,12 +1028,16 @@ function grokDailyTokens(days, ensure) {
           prev = tot;
         }
       }
-      let model = 'grok-4.5';
+      // Only the summary's current_model_id is a fact; inventing "grok-4.5"
+      // would present a hardcoded default as a detected model.
+      let model = 'unknown';
       const summary = loadJSON(path.join(path.dirname(f), 'summary.json'), null);
-      if (summary && summary.current_model_id) model = summary.current_model_id;
+      if (summary && typeof summary.current_model_id === 'string' && summary.current_model_id.trim()) {
+        model = summary.current_model_id.trim();
+      }
       grokTokFileCache[f] = { mtime: st.mtimeMs, days: fdays, model };
     }
-    const gModel = grokTokFileCache[f].model || 'grok-4.5';
+    const gModel = grokTokFileCache[f].model || 'unknown';
     for (const [k, v] of Object.entries(grokTokFileCache[f].days)) {
       const d = ensure(days, k);
       d.grok.total += v;

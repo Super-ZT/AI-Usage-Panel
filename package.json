@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node refresher.js",
     "accuracy:codex": "node scripts/prove-codex-accuracy.js",
-    "test": "node test/proxy.test.js && node test/events.test.js && node test/adapters.test.js && node test/local-usage.test.js && node test/sync.test.js && node test/dashboard.test.js && node test/accounts.test.js && node test/operations.test.js && node test/compose-healthcheck.test.js && node test/windows-installer.test.js && sh test/package.test.sh"
+    "test": "node test/proxy.test.js && node test/events.test.js && node test/adapters.test.js && node test/local-usage.test.js && node test/detect.test.js && node test/sync.test.js && node test/portal-relay.test.js && node test/dashboard.test.js && node test/accounts.test.js && node test/operations.test.js && node test/compose-healthcheck.test.js && node test/windows-installer.test.js && sh test/package.test.sh"
   },
   "engines": {
     "node": ">=18"
