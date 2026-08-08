@@ -18,10 +18,38 @@
 
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const outbox = require('./outbox');
 const { identity } = require('../core/device');
+
+/**
+ * Shown when the collector refuses this device's credential. Device
+ * credentials expire, so the ordinary cause is a link that has simply run out
+ * rather than anything the customer did wrong.
+ */
+const RELINK_MESSAGE = 'This computer is no longer linked to Super ZT. '
+  + 'Create a new link code at super-zt.com/portal/usage-panel and link it again — '
+  + 'usage already recorded on this PC is kept and will be sent once linking succeeds.';
+
+/**
+ * Collector refusal reasons that can stop being true, so the events must be
+ * offered again rather than thrown away. A device clock a few minutes fast has
+ * every event refused; the same events are valid once the clock is corrected.
+ */
+const RETRYABLE_REJECTION_REASONS = new Set(['timestamp_out_of_range']);
+
+/**
+ * Identify a credential without keeping a copy of it, so the cursor can tell
+ * "still the credential that was refused" from "the device has been linked
+ * again" without ever storing the secret.
+ * @param {string} credential
+ * @returns {string}
+ */
+function credentialFingerprint(credential) {
+  return crypto.createHash('sha256').update(String(credential)).digest('hex').slice(0, 16);
+}
 
 /** Hosts for which plaintext HTTP is tolerated without an explicit override. */
 const PRIVATE_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/i;
@@ -178,11 +206,29 @@ async function pushOnce(config) {
     return { ok: false, sent: 0, pending: 0, message: err.message };
   }
 
-  const { batch, pendingTotal } = outbox.pending({
+  // A credential the collector has already refused is not sent again until its
+  // retry time. Without this the panel repeats a dead credential on every tick
+  // for as long as the PC is switched on, and never says why nothing arrives.
+  const fingerprint = credentialFingerprint(credential);
+  const link = outbox.linkState(fingerprint);
+  if (link.relinkRequired && !link.mayRetry) {
+    const waiting = outbox.pending({ limit: 1e9, lookbackDays: config.lookbackDays || 45 });
+    return {
+      ok: false,
+      sent: 0,
+      pending: waiting.pendingTotal + waiting.waitingTotal,
+      relinkRequired: true,
+      nextAttemptAt: link.retryAfter,
+      message: link.message || RELINK_MESSAGE
+    };
+  }
+
+  outbox.pruneDeferred(config.lookbackDays || 45);
+  const { batch, pendingTotal, waitingTotal } = outbox.pending({
     limit: usesPortalContract(url) ? Math.min(config.batchSize || 200, 200) : (config.batchSize || 500),
     lookbackDays: config.lookbackDays || 45
   });
-  if (!batch.length) return { ok: true, sent: 0, pending: 0 };
+  if (!batch.length) return { ok: true, sent: 0, pending: 0, waiting: waitingTotal };
 
   const localDevice = identity(config.deviceLabel);
   const device = {
@@ -216,9 +262,18 @@ async function pushOnce(config) {
   }
 
   if (response.status === 401 || response.status === 403) {
-    const message = 'collector rejected the device credential';
-    outbox.markError(message);
-    return { ok: false, sent: 0, pending: pendingTotal, message };
+    // Authoritative: the collector looked at this credential and refused it.
+    // Record which credential, so re-linking clears the state by itself.
+    outbox.markCredentialRejected(fingerprint, RELINK_MESSAGE);
+    const state = outbox.linkState(fingerprint);
+    return {
+      ok: false,
+      sent: 0,
+      pending: pendingTotal + waitingTotal,
+      relinkRequired: true,
+      nextAttemptAt: state.retryAfter,
+      message: RELINK_MESSAGE
+    };
   }
   if (response.status < 200 || response.status >= 300) {
     const message = 'collector returned HTTP ' + response.status;
@@ -243,29 +298,50 @@ async function pushOnce(config) {
       : batch.map((e) => e.event_id))
     .filter((id) => batchIds.has(id)))];
   const acceptedSet = new Set(acceptedIds);
-  const rejectedIds = [...new Set((outcomes
-    ? outcomes.filter((entry) => entry && entry.status === 'rejected').map((entry) => entry.eventId)
+  // Keep each refusal's reason attached to its id: a refusal the device can
+  // grow out of must be retried, and one it cannot must not be.
+  /** @type {Array<{eventId:string, reason:string}>} */
+  const refusals = outcomes
+    ? outcomes.filter((entry) => entry && entry.status === 'rejected')
+      .map((entry) => ({ eventId: entry.eventId, reason: entry.reason ? String(entry.reason) : 'unknown' }))
     : response.json && Array.isArray(response.json.permanentlyRejected)
       ? response.json.permanentlyRejected
-      .map((entry) => {
-        if (typeof entry === 'string') return entry;
-        if (!entry || typeof entry !== 'object') return null;
-        if (entry.event_id) return entry.event_id;
-        const index = Number(entry.event_index);
-        return Number.isInteger(index) && index >= 0 && index < batch.length
-          ? batch[index].event_id : null;
-      })
-      .filter(Boolean)
-    : [])
-    .filter((id) => batchIds.has(id) && !acceptedSet.has(id)))];
+        .map((entry) => {
+          if (typeof entry === 'string') return { eventId: entry, reason: 'unknown' };
+          if (!entry || typeof entry !== 'object') return null;
+          const reason = entry.reason ? String(entry.reason) : 'unknown';
+          if (entry.event_id) return { eventId: entry.event_id, reason };
+          const index = Number(entry.event_index);
+          return Number.isInteger(index) && index >= 0 && index < batch.length
+            ? { eventId: batch[index].event_id, reason } : null;
+        })
+        .filter(Boolean)
+      : [];
+
+  const seenRefusal = new Set();
+  const permanent = [];
+  const deferrable = [];
+  for (const refusal of refusals) {
+    if (!batchIds.has(refusal.eventId) || acceptedSet.has(refusal.eventId)) continue;
+    if (seenRefusal.has(refusal.eventId)) continue;
+    seenRefusal.add(refusal.eventId);
+    if (RETRYABLE_REJECTION_REASONS.has(refusal.reason)) deferrable.push(refusal);
+    else permanent.push(refusal.eventId);
+  }
 
   outbox.markSent(acceptedIds);
-  outbox.markRejected(rejectedIds);
+  // A delivery on this credential proves the link is alive again.
+  if (acceptedIds.length) outbox.clearCredentialRejection();
+  const held = outbox.markDeferred(deferrable);
+  outbox.markRejected(permanent);
+  const rejectedCount = permanent.length + held.exhausted.length;
   return {
     ok: true,
     sent: acceptedIds.length,
-    rejected: rejectedIds.length,
-    pending: Math.max(0, pendingTotal - acceptedIds.length - rejectedIds.length)
+    rejected: rejectedCount,
+    deferred: held.deferred.length,
+    pending: Math.max(0, pendingTotal - acceptedIds.length - rejectedCount - held.deferred.length),
+    waiting: waitingTotal + held.deferred.length
   };
 }
 
@@ -279,14 +355,27 @@ async function push(config, maxBatches) {
   const cap = maxBatches || 20;
   let sent = 0;
   let rejected = 0;
+  let deferred = 0;
   let last = { ok: true, sent: 0, pending: 0 };
   for (let i = 0; i < cap; i++) {
     last = await pushOnce(config);
     sent += last.sent;
     rejected += last.rejected || 0;
+    deferred += last.deferred || 0;
+    // A refused credential stops the drain immediately: every remaining batch
+    // would be refused the same way.
     if (!last.ok || (last.sent === 0 && !last.rejected)) break;
   }
-  return { ok: last.ok, sent, rejected, pending: last.pending, message: last.message };
+  return {
+    ok: last.ok,
+    sent,
+    rejected,
+    deferred,
+    pending: last.pending,
+    relinkRequired: !!last.relinkRequired,
+    nextAttemptAt: last.nextAttemptAt || null,
+    message: last.message
+  };
 }
 
 /**
