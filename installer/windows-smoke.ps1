@@ -492,21 +492,49 @@ try {
 }
 
 # Real missing-WebView2 path: point Microsoft's loader at an empty folder so
-# GetAvailableBrowserVersionString fails for a genuine reason (no in-app override).
+# CoreWebView2Environment.GetAvailableBrowserVersionString fails for a genuine
+# reason (no in-app override). Launch the exact installed desktop shortcut.
 Stop-AllPanelProcesses
+if (-not (Test-Path -LiteralPath $DesktopShortcutPath)) {
+  throw "installed desktop shortcut missing before WEBVIEW2_MISSING proof: $DesktopShortcutPath"
+}
 $wv2EmptyRuntime = Join-Path $env:TEMP ("usage-panel-smoke-no-webview2-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $wv2EmptyRuntime -Force | Out-Null
+# Empty directory: zero browser files, so the loader cannot resolve a runtime.
+if (@(Get-ChildItem -LiteralPath $wv2EmptyRuntime -Force -ErrorAction SilentlyContinue).Count -ne 0) {
+  throw "WEBVIEW2 empty runtime directory was not empty: $wv2EmptyRuntime"
+}
 $env:WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = $wv2EmptyRuntime
+Write-Host "webview2_loader_force=WEBVIEW2_BROWSER_EXECUTABLE_FOLDER;empty_dir=$wv2EmptyRuntime"
+Write-Host "webview2_loader_query=CoreWebView2Environment.GetAvailableBrowserVersionString"
 try {
-  $wv2Proc = Start-Process -FilePath (Join-Path $InstallDir "UsagePanel.exe") -WorkingDirectory ([IO.Path]::GetTempPath()) -PassThru
+  # Inherit the process env (including the empty-folder force) into the
+  # customer-facing installed shortcut target.
+  Start-Process -FilePath $DesktopShortcutPath
   $wv2Window = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
   if (-not (Wait-DiagnosticStatus -Status "WEBVIEW2_MISSING")) {
     Note-StagedAppFailure -Name "WEBVIEW2_MISSING" -Detail "empty WEBVIEW2_BROWSER_EXECUTABLE_FOLDER did not record WEBVIEW2_MISSING"
   } else {
     Write-Host "webview2_missing=visible_status_WEBVIEW2_MISSING"
+    Write-Host "webview2_loader_unavailable=true;method=GetAvailableBrowserVersionString;force=empty_WEBVIEW2_BROWSER_EXECUTABLE_FOLDER;no_in_app_override=true"
   }
   if ($wv2Window.MainWindowTitle -ne "Usage Panel - Could not open") {
     Note-StagedAppFailure -Name "WEBVIEW2_MISSING_UI" -Detail "unexpected failure window title"
+  }
+  # launcher.log is the product's Windows diagnostic log (status-only). Require
+  # the loader-level missing outcome there; never accept a force-flag claim.
+  if (Test-Path -LiteralPath $DiagnosticFile) {
+    $diagText = Get-Content -LiteralPath $DiagnosticFile -Raw -ErrorAction SilentlyContinue
+    if ($diagText -notmatch "WEBVIEW2_MISSING") {
+      Note-StagedAppFailure -Name "WEBVIEW2_MISSING_LOG" -Detail "launcher.log did not contain WEBVIEW2_MISSING after empty-folder loader force"
+    } else {
+      Write-Host "webview2_windows_log=launcher.log:WEBVIEW2_MISSING"
+    }
+    if ($diagText -match "USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING") {
+      throw "launcher.log mentions retired force override; in-app override must stay gone"
+    }
+  } else {
+    Note-StagedAppFailure -Name "WEBVIEW2_MISSING_LOG" -Detail "launcher.log missing after WEBVIEW2_MISSING proof"
   }
   try { Save-WindowScreenshot -Process $wv2Window -Name "webview2-missing" } catch { Write-Host "screenshot_webview2_missing_skipped=$($_.Exception.Message)" }
   Assert-DiagnosticsSanitized
@@ -515,6 +543,7 @@ try {
   Stop-AllPanelProcesses
   Remove-Item Env:\WEBVIEW2_BROWSER_EXECUTABLE_FOLDER -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $wv2EmptyRuntime -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Host "webview2_loader_force_cleanup=removed_env_and_empty_dir"
 }
 
 # First-run unlinked enrollment: remove sentinel, launch, expect enrollment start, then cancel dialog.

@@ -52,6 +52,20 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(build, /UsagePanel\.exe/);
   assert.match(build, /WorkRoot|RUNNER_TEMP|TEMP/,
     'build must not hard-require GitHub Actions RUNNER_TEMP alone');
+  // Package contract: zero retired override in shipped app sources + publish
+  // output, scanned as both ASCII and UTF-16LE, with a known-present control.
+  assert.match(build, /Assert-NoRetiredOverrideBytes/,
+    'build must run the retired-override package contract');
+  assert.match(build, /USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING/,
+    'build contract must name the retired override it forbids');
+  assert.match(build, /Unicode\.GetBytes|Encoding\]::Unicode/,
+    'build contract must scan UTF-16LE (not ASCII alone)');
+  assert.match(build, /shipped-app-source/,
+    'build contract must scan shipped app sources');
+  assert.match(build, /win-x64-publish-output/,
+    'build contract must scan built publish output');
+  assert.match(build, /control_hits|control failed/,
+    'build contract must include a known-present control that proves the scanner works');
 
   const host = read('app/host.cs');
   assert.match(host, /http:\/\/127\.0\.0\.1:8899/,
@@ -204,8 +218,16 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     'smoke must retain a window screenshot as CI evidence');
   assert.match(windowsSmoke, /WEBVIEW2_BROWSER_EXECUTABLE_FOLDER/,
     'smoke must force a real WebView2 loader failure via Microsoft empty-folder env');
-  assert.doesNotMatch(windowsSmoke, /USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING/,
-    'retired in-app WebView2 force override must not appear in smoke');
+  assert.match(windowsSmoke, /Start-Process -FilePath \$DesktopShortcutPath/,
+    'WEBVIEW2_MISSING proof must launch the exact installed desktop shortcut');
+  assert.match(windowsSmoke, /GetAvailableBrowserVersionString/,
+    'smoke must document the real loader query being forced unavailable');
+  assert.match(windowsSmoke, /webview2_loader_unavailable|webview2_windows_log/,
+    'smoke must emit loader-level unavailability markers from Windows diagnostics');
+  // The retired override may appear only as a negative assertion (must not be
+  // in launcher.log / must not be reintroduced). Forbid setting it as smoke env.
+  assert.doesNotMatch(windowsSmoke, /\$env:USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING/,
+    'retired in-app WebView2 force override must not be set by smoke');
   assert.match(windowsSmoke, /WEBVIEW2_MISSING/,
     'smoke must still assert the WEBVIEW2_MISSING visible status');
   assert.match(windowsSmoke, /port_conflict_foreign_listener_alive|foreign_listener/);
