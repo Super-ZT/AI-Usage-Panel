@@ -491,14 +491,17 @@ try {
   Stop-AllPanelProcesses
 }
 
-# Forced missing-WebView2 path: correct in-window message + WEBVIEW2_MISSING status.
+# Real missing-WebView2 path: point Microsoft's loader at an empty folder so
+# GetAvailableBrowserVersionString fails for a genuine reason (no in-app override).
 Stop-AllPanelProcesses
-$env:USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING = "1"
+$wv2EmptyRuntime = Join-Path $env:TEMP ("usage-panel-smoke-no-webview2-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $wv2EmptyRuntime -Force | Out-Null
+$env:WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = $wv2EmptyRuntime
 try {
   $wv2Proc = Start-Process -FilePath (Join-Path $InstallDir "UsagePanel.exe") -WorkingDirectory ([IO.Path]::GetTempPath()) -PassThru
   $wv2Window = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
   if (-not (Wait-DiagnosticStatus -Status "WEBVIEW2_MISSING")) {
-    Note-StagedAppFailure -Name "WEBVIEW2_MISSING" -Detail "forced missing WebView2 did not record WEBVIEW2_MISSING"
+    Note-StagedAppFailure -Name "WEBVIEW2_MISSING" -Detail "empty WEBVIEW2_BROWSER_EXECUTABLE_FOLDER did not record WEBVIEW2_MISSING"
   } else {
     Write-Host "webview2_missing=visible_status_WEBVIEW2_MISSING"
   }
@@ -510,7 +513,8 @@ try {
 } finally {
   Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Stop-AllPanelProcesses
-  Remove-Item Env:\USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING -ErrorAction SilentlyContinue
+  Remove-Item Env:\WEBVIEW2_BROWSER_EXECUTABLE_FOLDER -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $wv2EmptyRuntime -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # First-run unlinked enrollment: remove sentinel, launch, expect enrollment start, then cancel dialog.

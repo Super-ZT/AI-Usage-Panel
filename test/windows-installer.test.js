@@ -202,8 +202,12 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     'dashboard visibility must be independently observed via Win32 child regions');
   assert.match(windowsSmoke, /Save-WindowScreenshot|screenshot_ok/,
     'smoke must retain a window screenshot as CI evidence');
-  assert.match(windowsSmoke, /USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING|WEBVIEW2_MISSING/,
-    'smoke must force the missing-WebView2 path');
+  assert.match(windowsSmoke, /WEBVIEW2_BROWSER_EXECUTABLE_FOLDER/,
+    'smoke must force a real WebView2 loader failure via Microsoft empty-folder env');
+  assert.doesNotMatch(windowsSmoke, /USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING/,
+    'retired in-app WebView2 force override must not appear in smoke');
+  assert.match(windowsSmoke, /WEBVIEW2_MISSING/,
+    'smoke must still assert the WEBVIEW2_MISSING visible status');
   assert.match(windowsSmoke, /port_conflict_foreign_listener_alive|foreign_listener/);
   assert.match(windowsSmoke, /first_run_unlinked_enrollment|FIRST_RUN_ENROLLMENT/);
   assert.match(windowsSmoke, /single_instance_ok|SINGLE_INSTANCE/);
