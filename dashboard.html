@@ -89,6 +89,12 @@
   .setup { border: 1px dashed var(--line2); padding: 12px 14px; margin-top: 10px; }
   .setup code { color: var(--mint); font-size: 11px; word-break: break-all; }
   .setup .k { font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 4px; }
+  .syncbar { margin: 12px 22px 0; padding: 10px 14px; border: 1px solid var(--line); background: var(--panel); font-size: 11px; letter-spacing: .5px; }
+  .syncbar.relink { border-color: var(--gold); color: var(--gold); }
+  .syncbar.error { border-color: var(--red); color: var(--red); }
+  .syncbar.waiting { border-color: var(--line2); color: var(--mut); }
+  .syncbar.ok { border-color: var(--line); color: var(--mut); }
+  .syncbar .k { font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -106,6 +112,7 @@
   </h1>
   <div class="hb"><span id="upd">—</span><a id="refall">⟳ refresh all</a></div>
 </header>
+<div id="syncwrap"></div>
 <div class="wrap"><main id="grid"></main></div>
 <div id="harnwrap" style="padding:0 22px 0"></div>
 <div id="detectwrap" style="padding:0 22px 0"></div>
@@ -321,6 +328,47 @@ async function pollDetect(){
     detectData = await r.json();
     document.getElementById('detectwrap').innerHTML = detectCard();
   }catch(e){ /* optional section */ }
+}
+
+// ---------- Super ZT link / upload status ----------
+// Surface re-link, waiting, and error states that used to live only in a log
+// file. Polls the same /api/sync payload the server exposes for outbox health.
+function syncBar(data){
+  if(!data || data.error) return '';
+  const state = data.customerState || (data.relinkRequired ? 'relink' : data.configured ? 'ok' : 'unconfigured');
+  const msg = data.customerMessage
+    || (data.relinkRequired ? 'This computer is no longer linked to Super ZT. Create a new link code and enroll again.'
+      : data.configured ? 'Linked to Super ZT.'
+        : 'This computer is not linked to Super ZT yet.');
+  const label = state === 'relink' ? 'RE-LINK REQUIRED'
+    : state === 'waiting' ? 'UPLOAD WAITING'
+      : state === 'error' ? 'UPLOAD ERROR'
+        : state === 'ok' ? 'SUPER ZT LINK'
+          : 'NOT LINKED';
+  const cls = state === 'relink' ? 'relink'
+    : state === 'error' ? 'error'
+      : state === 'waiting' ? 'waiting'
+        : 'ok';
+  let meta = '';
+  if(data.pendingTotal > 0 || data.waitingTotal > 0){
+    meta += ' · '+(data.pendingTotal||0)+' pending'
+      +(data.waitingTotal ? ' · '+data.waitingTotal+' waiting for retry' : '');
+  }
+  if(data.oldestPendingDay) meta += ' · backlog from '+esc(data.oldestPendingDay);
+  if(data.lastSyncAt && state === 'ok') meta += ' · last ok '+esc(data.lastSyncAt);
+  return '<div class="syncbar '+cls+'" data-sync-state="'+esc(state)+'">'
+    + '<span class="k">'+label+'</span>'
+    + esc(msg)+esc(meta)
+    + '</div>';
+}
+
+async function pollSync(){
+  try{
+    const r = await fetch('/api/sync', {cache:'no-store'});
+    const data = await r.json();
+    const el = document.getElementById('syncwrap');
+    if(el) el.innerHTML = syncBar(data);
+  }catch(e){ /* optional: local-only panel without sync */ }
 }
 
 // ---------- harnesses (capture proxy) ----------
@@ -541,15 +589,17 @@ window.addEventListener('online', ()=>poll());
 document.addEventListener('click', async (e)=>{
   const t = e.target;
   if(t.hasAttribute('data-tok')){ tokMode = t.getAttribute('data-tok'); renderTok(); return; }
-  if(t.id==='refall' || t.hasAttribute('data-refresh')){ poll(true); pollTokens(); pollHarnesses(); return; }
+  if(t.id==='refall' || t.hasAttribute('data-refresh')){ poll(true); pollTokens(); pollHarnesses(); pollSync(); return; }
 });
 
 poll();
 pollTokens();
 pollHarnesses();
 pollDetect();
+pollSync();
 setInterval(pollHarnesses, 30000);
 setInterval(pollDetect, 300000);
+setInterval(pollSync, 15000);
 setInterval(poll, 10000);
 setInterval(pollTokens, 300000);
 setInterval(tick, 1000);

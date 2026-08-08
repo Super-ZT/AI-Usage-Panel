@@ -338,7 +338,7 @@ function sampleLocalEvent(over) {
         allowInsecure: true
       });
       assert.strictEqual(push.ok, false);
-      assert.match(push.message || '', /credential|Authentication|rejected/i);
+      assert.match(push.message || '', /credential|Authentication|rejected|linked/i);
       assert.strictEqual(push.sent, 0);
       assert.strictEqual(portal.portalSnapshot('claude-code').usage.eventCount, 0);
       // Pending outbox still contains the unsent event id.
