@@ -87,15 +87,19 @@ async function resetState() {
 }
 
 let eventSeq = 0;
-/** Append one real usage event, flush it to disk, and return its stable id. */
-async function appendEvent() {
+/**
+ * Append one real usage event, flush it to disk, and return its stable id.
+ * @param {number} [ageDays=0] how long ago the usage happened
+ */
+async function appendEvent(ageDays) {
   eventSeq++;
+  const age = (Number(ageDays) || 0) * 24 * 3600 * 1000;
   const result = events.append({
     device_id: 'device-under-test',
     harness: 'claude-code',
     provider: 'anthropic',
     model: 'claude-opus-5',
-    ts: new Date(Date.now() - 60000 - eventSeq * 1000).toISOString(),
+    ts: new Date(Date.now() - age - 60000 - eventSeq * 1000).toISOString(),
     tokens: { in: 1000 + eventSeq, out: 500, cache_read: 0, cache_write: 0 },
     source: 'local_log'
   });
@@ -313,6 +317,93 @@ function config(endpoint, credential) {
       assert.equal(result.ok, false, 'an unusable answer is not treated as delivery');
       assert.equal(result.sent, 0);
       assert.ok(!outbox.loadCursor().sent.includes(id), 'the event is not marked sent');
+    } finally { await collector.close(); }
+  });
+
+  // ---- a computer that was off or offline for months ----------------------
+
+  await test('usage older than the 45-day scan window is still delivered', async () => {
+    await resetState();
+    const old = await appendEvent(60);      // two months ago
+    const older = await appendEvent(120);   // four months ago
+    const recent = await appendEvent(1);
+    const seen = [];
+    const collector = await startCollector((body) => {
+      for (const e of body.events) seen.push(e.eventId);
+      return { status: 200, json: { outcomes: body.events.map((e) => ({ eventId: e.eventId, status: 'accepted' })) } };
+    });
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 3, 'all three are delivered, not just the recent one');
+      assert.ok(seen.includes(old), 'the 60-day-old event reached the collector');
+      assert.ok(seen.includes(older), 'the 120-day-old event reached the collector');
+      assert.ok(seen.includes(recent), 'the recent event reached the collector');
+    } finally { await collector.close(); }
+  });
+
+  await test('a long backlog is counted, not silently dropped', async () => {
+    await resetState();
+    await appendEvent(90);
+    await appendEvent(2);
+    const state = outbox.status();
+    assert.equal(state.pendingTotal, 2, 'both are waiting to be delivered');
+    const ninetyDaysAgo = new Date(Date.now() - 88 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    assert.ok(state.oldestPendingDay < ninetyDaysAgo,
+      'the panel can say how far back the backlog reaches, got ' + state.oldestPendingDay);
+  });
+
+  await test('an old event delivered once is not offered again', async () => {
+    const seen = [];
+    const collector = await startCollector((body) => {
+      for (const e of body.events) seen.push(e.eventId);
+      return { status: 200, json: { outcomes: body.events.map((e) => ({ eventId: e.eventId, status: 'accepted' })) } };
+    });
+    try {
+      const first = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(first.sent, 2);
+      const second = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(second.sent, 0, 'nothing is re-sent');
+      assert.equal(seen.length, 2, 'the collector saw each event exactly once');
+      assert.equal(new Set(seen).size, 2, 'no duplicate ids');
+      assert.equal(outbox.status().pendingTotal, 0);
+    } finally { await collector.close(); }
+  });
+
+  await test('back-filled old usage found later is still picked up', async () => {
+    // The delivery floor has just moved forward because the backlog cleared.
+    // Usage the log reader only discovers now, dated inside the scan window,
+    // must not fall behind that floor.
+    const backfilled = await appendEvent(30);
+    const seen = [];
+    const collector = await startCollector((body) => {
+      for (const e of body.events) seen.push(e.eventId);
+      return { status: 200, json: { outcomes: body.events.map((e) => ({ eventId: e.eventId, status: 'accepted' })) } };
+    });
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1, 'the newly discovered 30-day-old event is delivered');
+      assert.ok(seen.includes(backfilled));
+    } finally { await collector.close(); }
+  });
+
+  await test('an event the collector says nothing about stays pending', async () => {
+    await resetState();
+    const answered = await appendEvent();
+    const ignored = await appendEvent();
+    const collector = await startCollector((body) => ({
+      status: 200,
+      // Only one of the two events is mentioned in the answer.
+      json: { outcomes: body.events.filter((e) => e.eventId === answered)
+        .map((e) => ({ eventId: e.eventId, status: 'accepted' })) }
+    }));
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1, 'only the acknowledged event counts as sent');
+      const cursor = outbox.loadCursor();
+      assert.ok(cursor.sent.includes(answered));
+      assert.ok(!cursor.sent.includes(ignored), 'an unmentioned event is NOT assumed delivered');
+      assert.ok(!cursor.rejected.includes(ignored), 'nor is it thrown away');
+      assert.ok(!cursor.deferred[ignored], 'nor is it held back');
     } finally { await collector.close(); }
   });
 

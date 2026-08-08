@@ -51,6 +51,7 @@ function emptyLink() {
  *   ids the collector refused for a reason that may pass, with the time to retry
  * @property {{status:string,fingerprint:string|null,since:string|null,message:string|null,attempts:number,retryAfter:string|null}} link
  *   whether the device credential is still accepted, and when to try it again
+ * @property {string|null} deliveryFloor earliest day still holding unacknowledged usage
  * @property {string|null} lastSyncAt
  * @property {string|null} lastError
  * @property {number} sentTotal
@@ -101,6 +102,9 @@ function loadCursor() {
       // deferred, link fine", never a reason to discard the rest of the cursor.
       deferred: normalizeDeferred(parsed.deferred),
       link: normalizeLink(parsed.link),
+      deliveryFloor: typeof parsed.deliveryFloor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.deliveryFloor)
+        ? parsed.deliveryFloor
+        : null,
       lastSyncAt: parsed.lastSyncAt || null,
       lastError: parsed.lastError || null,
       sentTotal: Number(parsed.sentTotal) || 0,
@@ -109,7 +113,7 @@ function loadCursor() {
     };
   } catch (_) {
     return {
-      sent: [], rejected: [], deferred: {}, link: emptyLink(),
+      sent: [], rejected: [], deferred: {}, link: emptyLink(), deliveryFloor: null,
       lastSyncAt: null, lastError: null, sentTotal: 0, rejectedTotal: 0, deferredTotal: 0
     };
   }
@@ -130,6 +134,30 @@ function saveCursor(cursor) {
 }
 
 /**
+ * Earliest day this device still has to consider for delivery.
+ *
+ * Delivery retention is deliberately NOT the aggregation window. A PC that was
+ * off or offline for longer than the scan window still holds usage nobody has
+ * acknowledged, and reading only the recent window made that usage vanish from
+ * `pendingTotal` while it was still sitting on disk — delivered-looking, never
+ * delivered. The floor tracks the oldest unacknowledged event instead, so the
+ * only ways out of the queue are an acknowledgement or a visible quarantine.
+ *
+ * @param {Cursor} cursor
+ * @param {string} lookbackFloor earliest day the aggregation window covers
+ * @returns {string} day string to read from
+ */
+function deliveryFrom(cursor, lookbackFloor) {
+  if (cursor.deliveryFloor) {
+    return cursor.deliveryFloor < lookbackFloor ? cursor.deliveryFloor : lookbackFloor;
+  }
+  // First run after upgrading, or a restored store: nothing has recorded how
+  // far back the backlog reaches, so look at everything the store still keeps.
+  // The answer is persisted below, so this full scan happens once.
+  return '0000-01-01';
+}
+
+/**
  * Collect events that have not yet been acknowledged.
  *
  * An event the collector deferred is not pending until its retry time passes;
@@ -138,9 +166,9 @@ function saveCursor(cursor) {
  *
  * @param {object} [options]
  * @param {number} [options.limit=500] maximum events per batch
- * @param {number} [options.lookbackDays=45] how far back to consider
+ * @param {number} [options.lookbackDays=45] how far back the aggregation window reaches
  * @param {number} [options.now=Date.now()]
- * @returns {{batch: object[], pendingTotal: number, waitingTotal: number}}
+ * @returns {{batch: object[], pendingTotal: number, waitingTotal: number, oldestPendingDay: string|null}}
  */
 function pending(options) {
   const opts = options || {};
@@ -151,18 +179,36 @@ function pending(options) {
   const cursor = loadCursor();
   const sent = new Set(cursor.sent);
   const rejected = new Set(cursor.rejected);
-  const from = events.utcDay(now - lookback * 24 * 3600 * 1000);
-  const all = events.read({ from });
+  const lookbackFloor = events.utcDay(now - lookback * 24 * 3600 * 1000);
+  const all = events.read({ from: deliveryFrom(cursor, lookbackFloor) });
 
   const unsent = all.filter((e) => e.event_id && !sent.has(e.event_id) && !rejected.has(e.event_id));
   const due = [];
   let waiting = 0;
+  let oldest = null;
   for (const event of unsent) {
+    const day = events.utcDay(event.ts);
+    if (!oldest || day < oldest) oldest = day;
     const held = cursor.deferred[event.event_id];
     if (held && Date.parse(held.until) > now) waiting++;
     else due.push(event);
   }
-  return { batch: due.slice(0, limit), pendingTotal: due.length, waitingTotal: waiting };
+
+  // Remember how far back the backlog reaches so the next run does not have to
+  // scan the whole store — but never past the aggregation window, or usage
+  // back-filled from a log the panel has only just read would be missed.
+  const floor = oldest && oldest < lookbackFloor ? oldest : lookbackFloor;
+  if (cursor.deliveryFloor !== floor) {
+    cursor.deliveryFloor = floor;
+    saveCursor(cursor);
+  }
+
+  return {
+    batch: due.slice(0, limit),
+    pendingTotal: due.length,
+    waitingTotal: waiting,
+    oldestPendingDay: oldest
+  };
 }
 
 /**
@@ -372,16 +418,19 @@ function markError(message) {
 /**
  * @returns {{lastSyncAt:string|null,lastError:string|null,sentTotal:number,
  *   rejectedTotal:number,pendingTotal:number,waitingTotal:number,deferredTotal:number,
- *   relinkRequired:boolean,relinkSince:string|null,nextAttemptAt:string|null}}
+ *   relinkRequired:boolean,relinkSince:string|null,nextAttemptAt:string|null,
+ *   oldestPendingDay:string|null}}
  */
 function status() {
   const cursor = loadCursor();
   let pendingTotal = 0;
   let waitingTotal = 0;
+  let oldestPendingDay = null;
   try {
     const counts = pending({ limit: 1e9 });
     pendingTotal = counts.pendingTotal;
     waitingTotal = counts.waitingTotal;
+    oldestPendingDay = counts.oldestPendingDay;
   } catch (_) { /* store unreadable */ }
   const relinkRequired = cursor.link.status === 'rejected';
   return {
@@ -397,7 +446,10 @@ function status() {
     // A device whose link has expired reports this instead of looking idle.
     relinkRequired,
     relinkSince: relinkRequired ? cursor.link.since : null,
-    nextAttemptAt: relinkRequired ? cursor.link.retryAfter : null
+    nextAttemptAt: relinkRequired ? cursor.link.retryAfter : null,
+    // How far back the undelivered backlog reaches, so a long outage is visible
+    // as a date rather than as a number that quietly stopped growing.
+    oldestPendingDay
   };
 }
 
