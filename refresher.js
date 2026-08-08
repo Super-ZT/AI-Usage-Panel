@@ -1028,12 +1028,16 @@ function grokDailyTokens(days, ensure) {
           prev = tot;
         }
       }
-      let model = 'grok-4.5';
+      // Only the summary's current_model_id is a fact; inventing "grok-4.5"
+      // would present a hardcoded default as a detected model.
+      let model = 'unknown';
       const summary = loadJSON(path.join(path.dirname(f), 'summary.json'), null);
-      if (summary && summary.current_model_id) model = summary.current_model_id;
+      if (summary && typeof summary.current_model_id === 'string' && summary.current_model_id.trim()) {
+        model = summary.current_model_id.trim();
+      }
       grokTokFileCache[f] = { mtime: st.mtimeMs, days: fdays, model };
     }
-    const gModel = grokTokFileCache[f].model || 'grok-4.5';
+    const gModel = grokTokFileCache[f].model || 'unknown';
     for (const [k, v] of Object.entries(grokTokFileCache[f].days)) {
       const d = ensure(days, k);
       d.grok.total += v;
@@ -1489,10 +1493,37 @@ const server = http.createServer(async (req, res) => {
       let payload;
       try {
         const cfg = CONFIG.sync || {};
+        const configured = !!(cfg.endpoint && cfg.deviceCredential);
+        const status = require('./src/sync/outbox').status();
+        // Customer-visible state: plain words for re-link vs waiting vs healthy.
+        let customerState = 'unconfigured';
+        let customerMessage = 'This computer is not linked to Super ZT yet.';
+        if (status.relinkRequired) {
+          customerState = 'relink';
+          customerMessage = status.lastError
+            || 'This computer is no longer linked to Super ZT. Create a new link code and enroll again.';
+        } else if (configured && (status.waitingTotal > 0 || status.pendingTotal > 0) && !status.lastSyncAt) {
+          customerState = 'waiting';
+          customerMessage = 'Usage is waiting to upload'
+            + (status.oldestPendingDay ? ' (backlog from ' + status.oldestPendingDay + ')' : '') + '.';
+        } else if (configured && status.lastError && !status.relinkRequired) {
+          customerState = 'error';
+          customerMessage = status.lastError;
+        } else if (configured) {
+          customerState = 'ok';
+          customerMessage = status.lastSyncAt
+            ? 'Linked. Last successful upload: ' + status.lastSyncAt
+            : 'Linked. Waiting for the first upload.';
+        }
         payload = Object.assign(
-          { enabled: !!cfg.enabled, endpoint: cfg.endpoint || null,
-            configured: !!(cfg.endpoint && cfg.deviceCredential) },
-          require('./src/sync/outbox').status()
+          {
+            enabled: !!cfg.enabled,
+            endpoint: cfg.endpoint || null,
+            configured,
+            customerState,
+            customerMessage
+          },
+          status
         );
       } catch (e) { payload = { error: String(e.message || e) }; }
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -1641,11 +1672,17 @@ function startCaptureProxy() {
         ev.model,
         (CONFIG.pricing && CONFIG.pricing.overrides) || {}
       );
+      // Carry Codex evidence fields through unchanged so the store and the
+      // portal serializer never invent verification that the wire did not prove.
       const result = eventStore.append({
         device_id: device.id,
         harness: ev.harness,
+        harness_evidence: ev.harnessEvidence || ev.harness_evidence || 'configured_route',
+        harness_verified: ev.harnessVerified === true || ev.harness_verified === true,
         provider: ev.provider,
         model: ev.model,
+        model_evidence: ev.modelEvidence || ev.model_evidence || 'unknown',
+        model_verified: ev.modelVerified === true || ev.model_verified === true,
         pricing_model: pricedModel ? pricedModel.id : null,
         ts: ev.ts,
         tokens: ev.usage,

@@ -145,9 +145,37 @@ function allFiles(directory, prefix = '') {
       'cacheReadTokens', 'cacheWrite5mTokens', 'cacheWrite1hTokens',
       'cacheWriteUnresolvedTokens', 'occurredAt'
     ];
-    const allowedKeys = requiredKeys;
+    // Optional fields the portal contract may also accept. They exist so the
+    // portal can price an event and say how its identity was established; none
+    // of them may carry free-form text from the machine.
+    const optionalKeys = [
+      'pricingModel', 'harnessEvidence', 'harnessVerified', 'modelEvidence', 'modelVerified'
+    ];
+    const allowedKeys = requiredKeys.concat(optionalKeys);
     assert.ok(requiredKeys.every((key) => Object.hasOwn(outbound.events[0], key)), 'outbound payload omitted a required key');
     assert.deepStrictEqual(Object.keys(outbound.events[0]).filter((key) => !allowedKeys.includes(key)), []);
+
+    // Widening the allowlist must not open a channel for arbitrary strings: the
+    // evidence fields are a closed vocabulary and the flags are booleans, so a
+    // later change cannot smuggle machine-specific text out through them.
+    const HARNESS_EVIDENCE = ['configured_route', 'local_log', 'official_api', 'unknown'];
+    const MODEL_EVIDENCE = ['provider_response', 'local_log', 'requested_only', 'unknown'];
+    for (const event of outbound.events) {
+      if (Object.hasOwn(event, 'harnessEvidence')) {
+        assert.ok(HARNESS_EVIDENCE.includes(event.harnessEvidence),
+          'harnessEvidence outside the known vocabulary: ' + event.harnessEvidence);
+      }
+      if (Object.hasOwn(event, 'modelEvidence')) {
+        assert.ok(MODEL_EVIDENCE.includes(event.modelEvidence),
+          'modelEvidence outside the known vocabulary: ' + event.modelEvidence);
+      }
+      if (Object.hasOwn(event, 'harnessVerified')) {
+        assert.strictEqual(typeof event.harnessVerified, 'boolean');
+      }
+      if (Object.hasOwn(event, 'modelVerified')) {
+        assert.strictEqual(typeof event.modelVerified, 'boolean');
+      }
+    }
 
     fs.mkdirSync(archiveDir); fs.mkdirSync(extractDir);
     const inventoryResult = await run('npm', [

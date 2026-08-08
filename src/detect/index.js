@@ -48,6 +48,11 @@ function whichSync(name) {
  * Resolve a harness's data directory.
  * Order: explicit override → environment variable → registry candidates.
  *
+ * An empty leftover folder is never treated as an install: harnesses with a
+ * registry marker must have that marker, and marker-less harnesses must have
+ * at least one file under the home (shallow) so a mkdir alone cannot spoof
+ * detection.
+ *
  * @param {import('./registry').HarnessSignature} sig
  * @param {string} [override] path from user config
  * @returns {{path:string, source:string}|null}
@@ -66,8 +71,12 @@ function resolveHome(sig, override) {
       if (!fs.existsSync(candidate.path)) continue;
       // A marker file distinguishes a real data directory from an empty stub
       // left behind by an uninstall.
-      if (sig.marker && !fs.existsSync(path.join(candidate.path, sig.marker))) continue;
-      return candidate;
+      if (sig.marker) {
+        if (!fs.existsSync(path.join(candidate.path, sig.marker))) continue;
+        return candidate;
+      }
+      // Marker-less harnesses: require real content, not a bare mkdir.
+      if (shallowCount(candidate.path) > 0) return candidate;
     } catch (_) { /* unreadable: treat as absent */ }
   }
   return null;
@@ -122,6 +131,11 @@ function proxyWiring(sig, proxy) {
 /**
  * Scan this machine for installed harnesses.
  *
+ * Detection is a pure function of PATH binaries and real on-disk harness
+ * homes. No Usage Panel environment variable, config flag, or test hook can
+ * invent a detection, a model name, or a token count — those come only from
+ * the harness footprint (or later, from transcripts / the capture wire).
+ *
  * @param {object} [options]
  * @param {Record<string,string>} [options.homes] per-harness path overrides
  * @param {{host:string, port:number, enabled:boolean, defaultProvider?:string}} [options.proxy]
@@ -149,17 +163,18 @@ function scan(options) {
       continue;
     }
 
+    const hasData = home ? shallowCount(home.path) > 0 : false;
     const wiring = proxy.enabled ? proxyWiring(sig, proxy) : null;
     detected.push({
       id: sig.id,
       label: sig.label,
+      // Binary on PATH, or a verified home (marker / non-empty), counts as
+      // installed. hasData is separate: an install can be real but never used.
       installed: true,
       binPath: bin,
       homePath: home ? home.path : null,
       homeSource: home ? home.source : null,
-      // A home directory with no files is an install that has never run, so
-      // its logs will be empty — worth surfacing rather than reporting silence.
-      hasData: home ? shallowCount(home.path) > 0 : false,
+      hasData,
       capabilities: {
         quota: sig.quota,
         tokens: sig.tokens,
@@ -182,4 +197,4 @@ function scan(options) {
   };
 }
 
-module.exports = { scan, whichSync, resolveHome, proxyWiring };
+module.exports = { scan, whichSync, resolveHome, proxyWiring, shallowCount };

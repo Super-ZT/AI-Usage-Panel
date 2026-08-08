@@ -27,8 +27,14 @@ const { dataDir, ensureDir } = require('./paths');
  * @property {string} event_id   stable idempotency key
  * @property {string} device_id
  * @property {string} harness    'claude-code' | 'opencode' | 'pi' | ...
+ * @property {'configured_route'|'local_log'|'official_api'|'unknown'} harness_evidence
+ * @property {false} harness_verified no current client evidence attests the calling process
  * @property {string} provider   'anthropic' | 'openrouter' | ...
- * @property {string|null} model model actually served
+ * @property {string|null} model model safe for downstream display
+ * @property {string|null} [observed_model] unverified model reported by a custom upstream
+ * @property {string|null} [requested_model] model supplied in the request
+ * @property {'provider_response'|'local_log'|'requested_only'|'unknown'} model_evidence
+ * @property {boolean} model_verified whether `model` came from a built-in HTTPS provider response
  * @property {string|null} [pricing_model] OpenRouter reference model when source billing uses one
  * @property {string} ts         ISO-8601 UTC
  * @property {{in:number,out:number,cache_read:number,cache_write:number,cache_write_5m:number,cache_write_1h:number,cache_write_unresolved:number,reasoning:number,unattributed:number,missing?:string[]}} tokens
@@ -41,6 +47,20 @@ const { dataDir, ensureDir } = require('./paths');
 
 /** In-memory index of event ids already written, keyed by UTC day. */
 const seenByDay = new Map();
+
+const HARNESS_EVIDENCE = new Set(['configured_route', 'local_log', 'official_api', 'unknown']);
+const MODEL_EVIDENCE = new Set(['provider_response', 'local_log', 'requested_only', 'unknown']);
+
+/** @param {any} input @param {'harness'|'model'} kind @returns {string} */
+function evidenceValue(input, kind) {
+  const snake = kind + '_evidence';
+  const camel = kind + 'Evidence';
+  if (input[snake] != null) return String(input[snake]);
+  if (input[camel] != null) return String(input[camel]);
+  if (input.source === 'local_log') return 'local_log';
+  if (input.source === 'official_api') return kind === 'harness' ? 'official_api' : 'unknown';
+  return 'unknown';
+}
 
 /**
  * @param {string|number|Date} ts
@@ -173,6 +193,23 @@ function normalizeTokens(t) {
 function append(input) {
   if (!input || !input.harness) return { written: false, event: null, reason: 'missing harness' };
 
+  const harnessEvidence = evidenceValue(input, 'harness');
+  const modelEvidence = evidenceValue(input, 'model');
+  if (!HARNESS_EVIDENCE.has(harnessEvidence)) {
+    return { written: false, event: null, reason: 'invalid harness evidence' };
+  }
+  if (!MODEL_EVIDENCE.has(modelEvidence)) {
+    return { written: false, event: null, reason: 'invalid model evidence' };
+  }
+  const modelVerified = input.model_verified === true || input.modelVerified === true;
+  const harnessVerified = input.harness_verified === true || input.harnessVerified === true;
+  if (harnessVerified) {
+    return { written: false, event: null, reason: 'invalid harness verification' };
+  }
+  if (modelVerified && modelEvidence !== 'provider_response') {
+    return { written: false, event: null, reason: 'invalid model verification' };
+  }
+
   const tokens = normalizeTokens(input.tokens);
   // An event with no tokens carries no usage information; recording it would
   // inflate call counts without adding anything measurable.
@@ -181,12 +218,27 @@ function append(input) {
   }
 
   /** @type {UsageEvent} */
+  const suppliedModel = input.model ? String(input.model) : null;
+  const suppliedObservedModel = input.observed_model != null
+    ? String(input.observed_model)
+    : input.observedModel != null ? String(input.observedModel) : null;
+  const suppliedRequestedModel = input.requested_model != null
+    ? String(input.requested_model)
+    : input.requestedModel != null ? String(input.requestedModel) : null;
+  const unverifiedProviderModel = modelEvidence === 'provider_response' && !modelVerified;
+  const requestedOnlyModel = modelEvidence === 'requested_only';
   const event = {
     event_id: '',
     device_id: input.device_id || 'unknown',
     harness: String(input.harness),
+    harness_evidence: harnessEvidence,
+    harness_verified: harnessVerified,
     provider: input.provider ? String(input.provider) : 'unknown',
-    model: input.model ? String(input.model) : null,
+    model: unverifiedProviderModel || requestedOnlyModel ? null : suppliedModel,
+    observed_model: suppliedObservedModel || (unverifiedProviderModel ? suppliedModel : null),
+    requested_model: suppliedRequestedModel || (requestedOnlyModel ? suppliedModel : null),
+    model_evidence: modelEvidence,
+    model_verified: modelVerified,
     pricing_model: input.pricing_model ? String(input.pricing_model) : null,
     ts: input.ts || new Date().toISOString(),
     tokens,
@@ -390,5 +442,6 @@ function prune(retentionDays) {
 
 module.exports = {
   append, flush, onError, read, rollup, prune,
-  deriveEventId, normalizeTokens, utcDay, eventsDir
+  deriveEventId, normalizeTokens, utcDay, eventsDir,
+  HARNESS_EVIDENCE, MODEL_EVIDENCE
 };
