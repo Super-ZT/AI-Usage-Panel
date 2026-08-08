@@ -144,6 +144,83 @@ function sampleEvent(over) {
     assert.strictEqual(r.event.tokens.cache_write_1h, 5);
   });
 
+  await test('local logs carry explicit local evidence without claiming provider verification', () => {
+    const r = events.append(sampleEvent({
+      request_id: 'req-local-evidence', source: 'local_log', harness: 'codex',
+      provider: 'openai', model: 'gpt-5.6-sol'
+    }));
+    assert.strictEqual(r.event.harness_evidence, 'local_log');
+    assert.strictEqual(r.event.model_evidence, 'local_log');
+    assert.strictEqual(r.event.model_verified, false);
+    assert.strictEqual(r.event.model, 'gpt-5.6-sol');
+  });
+
+  await test('custom-upstream observations are retained but never become the display model', () => {
+    const r = events.append(sampleEvent({
+      request_id: 'req-custom-evidence', model: null,
+      observedModel: 'custom/model', requestedModel: 'alias',
+      harnessEvidence: 'configured_route', modelEvidence: 'provider_response',
+      modelVerified: false
+    }));
+    assert.strictEqual(r.event.harness_evidence, 'configured_route');
+    assert.strictEqual(r.event.harness_verified, false);
+    assert.strictEqual(r.event.model_evidence, 'provider_response');
+    assert.strictEqual(r.event.model_verified, false);
+    assert.strictEqual(r.event.model, null);
+    assert.strictEqual(r.event.observed_model, 'custom/model');
+    assert.strictEqual(r.event.requested_model, 'alias');
+  });
+
+  await test('request-only model claims are separated from the display model', () => {
+    const r = events.append(sampleEvent({
+      request_id: 'req-requested-only', model: 'user/chosen-model',
+      harnessEvidence: 'configured_route', modelEvidence: 'requested_only'
+    }));
+    assert.strictEqual(r.event.model, null);
+    assert.strictEqual(r.event.requested_model, 'user/chosen-model');
+    assert.strictEqual(r.event.model_evidence, 'requested_only');
+    assert.strictEqual(r.event.model_verified, false);
+  });
+
+  await test('only provider-response evidence may be marked verified', () => {
+    const invalid = events.append(sampleEvent({
+      request_id: 'req-bad-verification', modelEvidence: 'requested_only', modelVerified: true
+    }));
+    assert.strictEqual(invalid.written, false);
+    assert.strictEqual(invalid.reason, 'invalid model verification');
+
+    const valid = events.append(sampleEvent({
+      request_id: 'req-provider-verified',
+      harnessEvidence: 'configured_route', modelEvidence: 'provider_response', modelVerified: true
+    }));
+    assert.strictEqual(valid.written, true);
+    assert.strictEqual(valid.event.model, 'anthropic/claude-opus-4.8');
+    assert.strictEqual(valid.event.model_verified, true);
+  });
+
+  await test('configured routes cannot claim verified harness identity', () => {
+    const r = events.append(sampleEvent({
+      request_id: 'req-bad-harness-verification',
+      harnessEvidence: 'configured_route', harnessVerified: true
+    }));
+    assert.strictEqual(r.written, false);
+    assert.strictEqual(r.reason, 'invalid harness verification');
+    const official = events.append(sampleEvent({
+      request_id: 'req-bad-official-harness-verification',
+      source: 'official_api', harnessEvidence: 'official_api', harnessVerified: true
+    }));
+    assert.strictEqual(official.written, false,
+      'an API source does not independently attest which local harness called it');
+  });
+
+  await test('invented evidence labels are rejected', () => {
+    const r = events.append(sampleEvent({
+      request_id: 'req-invented-evidence', modelEvidence: 'totally_verified'
+    }));
+    assert.strictEqual(r.written, false);
+    assert.strictEqual(r.reason, 'invalid model evidence');
+  });
+
   await test('unknown token categories survive normalization and affect natural identity', () => {
     const base = {
       device_id: 'd', harness: 'codex', provider: 'openai', model: 'gpt-5.6-sol',
