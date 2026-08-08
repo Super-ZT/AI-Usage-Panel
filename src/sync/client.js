@@ -91,8 +91,52 @@ function collectorPlatform(platform) {
   return platform;
 }
 
-/** Translate a local usage fact to the strict Super ZT portal event contract. */
-function portalEvent(event) {
+/**
+ * How much of the optional contract this collector has been shown to accept.
+ *
+ * The portal request schema is strict, so a collector that predates a field
+ * rejects the whole batch rather than ignoring the extra key. The device and
+ * the website are separate deployments and either can be older, so the client
+ * negotiates instead of assuming: it offers the richest payload, and steps down
+ * once if the collector refuses the shape. That turns a deployment-order
+ * dependency into something that heals itself in either direction.
+ */
+const CONTRACT_TIERS = ['full', 'pricing', 'base'];
+
+/** @param {string} tier @returns {string} the next narrower tier */
+function narrowerTier(tier) {
+  const index = CONTRACT_TIERS.indexOf(tier);
+  return CONTRACT_TIERS[Math.min(index + 1, CONTRACT_TIERS.length - 1)];
+}
+
+/**
+ * Evidence recorded with the event, defaulted honestly.
+ *
+ * An event written before evidence existed carries none, and the only safe
+ * answer for it is `unknown` — deriving a class from other fields would be this
+ * client inventing a provenance nobody recorded. Nothing here ever raises a
+ * claim: `model_verified` is passed through exactly as stored, and the model
+ * string is whatever the store holds, which is already null for a model the
+ * store judged unverified.
+ *
+ * @param {object} event
+ * @returns {{harnessEvidence:string, harnessVerified:boolean, modelEvidence:string, modelVerified:boolean}}
+ */
+function evidenceOf(event) {
+  return {
+    harnessEvidence: typeof event.harness_evidence === 'string' ? event.harness_evidence : 'unknown',
+    harnessVerified: event.harness_verified === true,
+    modelEvidence: typeof event.model_evidence === 'string' ? event.model_evidence : 'unknown',
+    modelVerified: event.model_verified === true
+  };
+}
+
+/**
+ * Translate a local usage fact to the strict Super ZT portal event contract.
+ * @param {object} event
+ * @param {string} [tier='full'] how much of the optional contract to include
+ */
+function portalEvent(event, tier) {
   const tokens = event.tokens || {};
   const totalWrite = Math.max(0, Number(tokens.cache_write) || 0);
   let fiveMinute = Math.max(0, Number(tokens.cache_write_5m) || 0);
@@ -105,10 +149,12 @@ function portalEvent(event) {
   if (!fiveMinute && !oneHour && !unresolved) fiveMinute = totalWrite;
   else unresolved = Math.max(unresolved, residual);
 
-  return {
+  const wire = {
     eventId: event.event_id,
     harness: event.harness,
     provider: event.provider,
+    // Passed through as stored. The store already writes null here for a model
+    // it judged unverified, and this must not put the observed string back.
     model: event.model,
     source: event.source,
     inputTokens: Math.max(0, Number(tokens.in) || 0),
@@ -119,6 +165,17 @@ function portalEvent(event) {
     cacheWriteUnresolvedTokens: unresolved,
     occurredAt: event.ts
   };
+
+  const level = tier || 'full';
+  if (level === 'base') return wire;
+
+  // The catalogue id for a model string that is not itself priceable
+  // (codex-auto-review -> gpt-5.6-sol). Without it the portal cannot price
+  // those events and disagrees with the panel on the same usage.
+  wire.pricingModel = event.pricing_model != null ? event.pricing_model : null;
+  if (level === 'pricing') return wire;
+
+  return Object.assign(wire, evidenceOf(event));
 }
 
 /**
@@ -239,8 +296,12 @@ async function pushOnce(config) {
   const standaloneEvents = batch.map((event) => ({
     event_id: event.event_id,
     harness: event.harness,
+    harness_evidence: event.harness_evidence,
+    harness_verified: event.harness_verified === true,
     provider: event.provider,
     model: event.model,
+    model_evidence: event.model_evidence,
+    model_verified: event.model_verified === true,
     pricing_model: event.pricing_model,
     ts: event.ts,
     tokens: event.tokens,
@@ -249,13 +310,23 @@ async function pushOnce(config) {
     status: event.status
   }));
   const portalContract = usesPortalContract(url);
-  const outboundEvents = portalContract ? batch.map(portalEvent) : standaloneEvents;
+
   let response;
+  let tier = outbox.contractTier();
   try {
-    const body = portalContract
-      ? { events: outboundEvents }
-      : { device: { id: device.id, label: device.label, platform: device.platform }, events: outboundEvents };
-    response = await postJSON(url, body, credential, config.timeoutMs);
+    for (;;) {
+      const body = portalContract
+        ? { events: batch.map((event) => portalEvent(event, tier)) }
+        : { device: { id: device.id, label: device.label, platform: device.platform }, events: standaloneEvents };
+      response = await postJSON(url, body, credential, config.timeoutMs);
+      // A strict collector refuses an unknown key by rejecting the batch. The
+      // retry is itself the discriminator: if a narrower payload is accepted the
+      // extra fields were the problem, and if it is refused too the batch is
+      // genuinely bad and falls through to the normal error path below.
+      if (!portalContract || response.status !== 400 || tier === 'base') break;
+      tier = narrowerTier(tier);
+      outbox.setContractTier(tier);
+    }
   } catch (err) {
     outbox.markError(err.message);
     return { ok: false, sent: 0, pending: pendingTotal, message: err.message };

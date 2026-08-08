@@ -38,6 +38,14 @@ const MAX_DEFER_ATTEMPTS = 8;
  */
 const LINK_BACKOFF_MS = [15 * 60 * 1000, 3600 * 1000, 6 * 3600 * 1000];
 
+/**
+ * How long to stay on a narrowed upload contract before offering the full one
+ * again. A collector that was older when we last asked may have been upgraded
+ * since, and nothing else would ever tell this device.
+ */
+const CONTRACT_REPROBE_MS = 6 * 3600 * 1000;
+const CONTRACT_TIERS = ['full', 'pricing', 'base'];
+
 /** @returns {{status:string,fingerprint:string|null,since:string|null,message:string|null,attempts:number,retryAfter:string|null}} */
 function emptyLink() {
   return { status: 'ok', fingerprint: null, since: null, message: null, attempts: 0, retryAfter: null };
@@ -52,6 +60,8 @@ function emptyLink() {
  * @property {{status:string,fingerprint:string|null,since:string|null,message:string|null,attempts:number,retryAfter:string|null}} link
  *   whether the device credential is still accepted, and when to try it again
  * @property {string|null} deliveryFloor earliest day still holding unacknowledged usage
+ * @property {{tier:string, since:string|null}} contract how much of the optional
+ *   upload contract this collector has been shown to accept
  * @property {string|null} lastSyncAt
  * @property {string|null} lastError
  * @property {number} sentTotal
@@ -105,6 +115,9 @@ function loadCursor() {
       deliveryFloor: typeof parsed.deliveryFloor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.deliveryFloor)
         ? parsed.deliveryFloor
         : null,
+      contract: parsed.contract && CONTRACT_TIERS.includes(parsed.contract.tier)
+        ? { tier: parsed.contract.tier, since: parsed.contract.since || null }
+        : { tier: 'full', since: null },
       lastSyncAt: parsed.lastSyncAt || null,
       lastError: parsed.lastError || null,
       sentTotal: Number(parsed.sentTotal) || 0,
@@ -114,6 +127,7 @@ function loadCursor() {
   } catch (_) {
     return {
       sent: [], rejected: [], deferred: {}, link: emptyLink(), deliveryFloor: null,
+      contract: { tier: 'full', since: null },
       lastSyncAt: null, lastError: null, sentTotal: 0, rejectedTotal: 0, deferredTotal: 0
     };
   }
@@ -451,7 +465,40 @@ function status() {
   };
 }
 
+/**
+ * Which upload contract to offer this collector now.
+ *
+ * A narrowed contract is not permanent: after the re-probe interval the full
+ * payload is offered again, so a collector upgraded on the other side starts
+ * receiving the richer fields without anyone touching this device.
+ *
+ * @param {number} [now=Date.now()]
+ * @returns {string} 'full' | 'pricing' | 'base'
+ */
+function contractTier(now) {
+  const at = Number(now) || Date.now();
+  const cursor = loadCursor();
+  if (cursor.contract.tier === 'full') return 'full';
+  const since = Date.parse(cursor.contract.since);
+  if (!Number.isFinite(since) || at - since >= CONTRACT_REPROBE_MS) return 'full';
+  return cursor.contract.tier;
+}
+
+/**
+ * Record that the collector refused a wider contract than this.
+ * @param {string} tier
+ * @param {number} [now=Date.now()]
+ */
+function setContractTier(tier, now) {
+  if (!CONTRACT_TIERS.includes(tier)) return;
+  const at = Number(now) || Date.now();
+  const cursor = loadCursor();
+  cursor.contract = { tier, since: tier === 'full' ? null : new Date(at).toISOString() };
+  saveCursor(cursor);
+}
+
 module.exports = {
   pending, markSent, markRejected, markDeferred, pruneDeferred, markError, status,
+  contractTier, setContractTier,
   markCredentialRejected, clearCredentialRejection, linkState, loadCursor, saveCursor
 };

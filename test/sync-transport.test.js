@@ -86,15 +86,39 @@ async function resetState() {
   });
 }
 
+
+/**
+ * A collector with a strict schema, like the real portal: any key it does not
+ * know rejects the whole batch with 400. `allowed` is the exact key set.
+ */
+const BASE_KEYS = ['eventId', 'harness', 'provider', 'model', 'source', 'inputTokens',
+  'outputTokens', 'cacheReadTokens', 'cacheWrite5mTokens', 'cacheWrite1hTokens',
+  'cacheWriteUnresolvedTokens', 'occurredAt'];
+const PRICING_KEYS = BASE_KEYS.concat(['pricingModel']);
+const EVIDENCE_KEYS = PRICING_KEYS.concat(['harnessEvidence', 'harnessVerified',
+  'modelEvidence', 'modelVerified']);
+
+function strictCollector(allowed, seen) {
+  return (body) => {
+    for (const event of body.events) {
+      for (const key of Object.keys(event)) {
+        if (!allowed.includes(key)) return { status: 400, json: { error: 'Invalid request' } };
+      }
+    }
+    if (seen) for (const event of body.events) seen.push(event);
+    return { status: 200, json: { outcomes: body.events.map((e) => ({ eventId: e.eventId, status: 'accepted' })) } };
+  };
+}
+
 let eventSeq = 0;
 /**
  * Append one real usage event, flush it to disk, and return its stable id.
  * @param {number} [ageDays=0] how long ago the usage happened
  */
-async function appendEvent(ageDays) {
+async function appendEvent(ageDays, extra) {
   eventSeq++;
   const age = (Number(ageDays) || 0) * 24 * 3600 * 1000;
-  const result = events.append({
+  const result = events.append(Object.assign({
     device_id: 'device-under-test',
     harness: 'claude-code',
     provider: 'anthropic',
@@ -102,8 +126,8 @@ async function appendEvent(ageDays) {
     ts: new Date(Date.now() - age - 60000 - eventSeq * 1000).toISOString(),
     tokens: { in: 1000 + eventSeq, out: 500, cache_read: 0, cache_write: 0 },
     source: 'local_log'
-  });
-  assert.ok(result.written, 'test event was written');
+  }, extra || {}));
+  assert.ok(result.written, 'test event was written: ' + (result.reason || ''));
   await events.flush();
   return result.event.event_id;
 }
@@ -412,6 +436,142 @@ function config(endpoint, credential) {
       assert.ok(!cursor.sent.includes(ignored), 'an unmentioned event is NOT assumed delivered');
       assert.ok(!cursor.rejected.includes(ignored), 'nor is it thrown away');
       assert.ok(!cursor.deferred[ignored], 'nor is it held back');
+    } finally { await collector.close(); }
+  });
+
+
+  // ---- what the upload carries -------------------------------------------
+
+  await test('the catalogue id for an unpriceable model string is sent', async () => {
+    await resetState();
+    outbox.setContractTier('full');
+    await appendEvent(0, { model: 'codex-auto-review', pricing_model: 'openai/gpt-5.6-sol' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(EVIDENCE_KEYS, seen));
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1);
+      assert.equal(seen[0].model, 'codex-auto-review', 'the raw model is still what is displayed');
+      assert.equal(seen[0].pricingModel, 'openai/gpt-5.6-sol', 'the portal can now price it');
+    } finally { await collector.close(); }
+  });
+
+  await test('an event with no recorded evidence is sent as unknown, never invented', async () => {
+    await resetState();
+    outbox.setContractTier('full');
+    // This base predates the evidence fields, so nothing on disk carries them.
+    await appendEvent(0, { source: 'local_log' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(EVIDENCE_KEYS, seen));
+    try {
+      await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(seen[0].harnessEvidence, 'unknown', 'no provenance is inferred from the source field');
+      assert.equal(seen[0].modelEvidence, 'unknown');
+      assert.equal(seen[0].harnessVerified, false, 'nothing claims a verified harness');
+      assert.equal(seen[0].modelVerified, false, 'nothing claims a verified model');
+    } finally { await collector.close(); }
+  });
+
+  await test('the displayed model is exactly what the store holds, never substituted', async () => {
+    await resetState();
+    outbox.setContractTier('full');
+    const stored = events.read({ from: '1970-01-01' });
+    await appendEvent(0, { model: 'claude-opus-5' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(EVIDENCE_KEYS, seen));
+    try {
+      await client.push(config(collector.endpoint, CREDENTIAL_A));
+      const after = events.read({ from: '1970-01-01' })
+        .find((e) => e.event_id === seen[0].eventId);
+      assert.equal(seen[0].model, after.model, 'the wire model equals the stored model');
+      assert.ok(stored.length >= 0);
+      // When the store nulls a model it judged unverified, the wire carries the
+      // null. Proven directly: a stored null must not be replaced by anything.
+      const nulled = Object.assign({}, after, { model: null, observed_model: 'pretend-model-9' });
+      const wire = client.portalEvent(nulled, 'full');
+      assert.equal(wire.model, null, 'a stored null model stays null on the wire');
+      assert.ok(!JSON.stringify(wire).includes('pretend-model-9'),
+        'an observed-but-unverified string never reaches the portal');
+    } finally { await collector.close(); }
+  });
+
+  // ---- talking to a collector older than this device ----------------------
+
+  await test('a collector that does not know the evidence fields still gets the usage', async () => {
+    await resetState();
+    outbox.setContractTier('full');
+    await appendEvent(0, { model: 'codex-auto-review', pricing_model: 'openai/gpt-5.6-sol' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(PRICING_KEYS, seen));
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1, 'the usage is delivered, not lost to a schema mismatch');
+      assert.equal(seen.length, 1);
+      assert.equal(seen[0].pricingModel, 'openai/gpt-5.6-sol', 'the field it DOES know is still sent');
+      assert.equal(seen[0].harnessEvidence, undefined, 'the field it does not know is dropped');
+      assert.equal(outbox.loadCursor().contract.tier, 'pricing', 'the narrowing is remembered');
+    } finally { await collector.close(); }
+  });
+
+  await test('today\'s live portal, which knows neither field, still gets the usage', async () => {
+    await resetState();
+    outbox.setContractTier('full');
+    await appendEvent(0, { pricing_model: 'openai/gpt-5.6-sol' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(BASE_KEYS, seen));
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1, 'usage still reaches an un-upgraded portal');
+      assert.equal(seen[0].pricingModel, undefined);
+      assert.equal(seen[0].modelEvidence, undefined);
+      assert.equal(outbox.loadCursor().contract.tier, 'base');
+    } finally { await collector.close(); }
+  });
+
+  await test('the narrowed contract is not re-tried on every push', async () => {
+    await appendEvent(0);
+    let refusals = 0;
+    const collector = await startCollector((body) => {
+      const answer = strictCollector(BASE_KEYS)(body);
+      if (answer.status === 400) refusals++;
+      return answer;
+    });
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1);
+      assert.equal(refusals, 0, 'the device remembered and did not offer a rejected shape again');
+    } finally { await collector.close(); }
+  });
+
+  await test('an upgraded portal starts receiving the richer fields again', async () => {
+    await resetState();
+    // The device narrowed six hours ago; the website has been upgraded since.
+    outbox.setContractTier('base', Date.now() - 7 * 3600 * 1000);
+    await appendEvent(0, { pricing_model: 'openai/gpt-5.6-sol' });
+    const seen = [];
+    const collector = await startCollector(strictCollector(EVIDENCE_KEYS, seen));
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.sent, 1);
+      assert.equal(seen[0].pricingModel, 'openai/gpt-5.6-sol', 'the richer contract is offered again');
+      assert.ok(seen[0].modelEvidence, 'and accepted');
+    } finally { await collector.close(); }
+  });
+
+  await test('a batch that is bad for some other reason is reported, not looped', async () => {
+    await resetState();
+    await appendEvent(0);
+    let requests = 0;
+    const collector = await startCollector(() => {
+      requests++;
+      return { status: 400, json: { error: 'Invalid request' } };
+    });
+    try {
+      const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
+      assert.equal(result.ok, false, 'reported as a failure');
+      assert.match(result.message, /400/);
+      assert.ok(requests <= 3, 'it stops after stepping through the tiers, got ' + requests);
+      assert.equal(outbox.status().pendingTotal, 1, 'the usage is still queued, not lost');
     } finally { await collector.close(); }
   });
 
