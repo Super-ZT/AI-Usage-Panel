@@ -1,4 +1,5 @@
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 !ifndef VERSION
   !define VERSION "1.0.3"
@@ -29,13 +30,57 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Var UpgradePrepareExit
+
 Section "Usage Panel" SEC_MAIN
   SetShellVarContext current
+  InitPluginsDir
+
+  ; Stage helpers before touching the install directory so an upgrade can stop
+  ; v1.0.2 processes and remove obsolete launchers without half-writing files.
+  SetOutPath "$PLUGINSDIR"
+  File "upgrade-prepare.ps1"
+
+  DetailPrint "Preparing install directory for Usage Panel ${VERSION}..."
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\upgrade-prepare.ps1" -InstallDir "$INSTDIR" -SkipWebView2' $UpgradePrepareExit
+  ${If} $UpgradePrepareExit != 0
+    MessageBox MB_OK|MB_ICONSTOP "Usage Panel could not prepare the install folder.$\r$\n$\r$\nClose any open Usage Panel windows and try again. The installer refuses a partial upgrade when files are locked."
+    Abort
+  ${EndIf}
+
   SetOutPath "$INSTDIR"
   Delete "$INSTDIR\.usage-panel-stop"
+  ; Explicitly remove obsolete v1.0.2 launchers even if the helper already did.
+  Delete "$INSTDIR\open-panel.cmd"
+  Delete "$INSTDIR\open-panel.vbs"
+  Delete "$INSTDIR\start-hidden.vbs"
+
+  ClearErrors
   File /r "..\dist\app\*"
+  IfErrors 0 +3
+    MessageBox MB_OK|MB_ICONSTOP "Usage Panel could not copy program files. Close Usage Panel and retry."
+    Abort
+
+  ; Fail closed if a locked upgrade left obsolete launchers behind.
+  IfFileExists "$INSTDIR\open-panel.cmd" 0 +3
+    MessageBox MB_OK|MB_ICONSTOP "Upgrade left obsolete open-panel.cmd behind. Close Usage Panel and retry."
+    Abort
+  IfFileExists "$INSTDIR\open-panel.vbs" 0 +3
+    MessageBox MB_OK|MB_ICONSTOP "Upgrade left obsolete open-panel.vbs behind. Close Usage Panel and retry."
+    Abort
+  IfFileExists "$INSTDIR\start-hidden.vbs" 0 +3
+    MessageBox MB_OK|MB_ICONSTOP "Upgrade left obsolete start-hidden.vbs behind. Close Usage Panel and retry."
+    Abort
+
+  ; Install Microsoft Edge WebView2 Evergreen bootstrapper only when missing.
+  ; Detection is registry-based; the app also fails visibly with WEBVIEW2_MISSING.
+  IfFileExists "$INSTDIR\MicrosoftEdgeWebview2Setup.exe" 0 webview2_done
+    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\upgrade-prepare.ps1" -InstallDir "$INSTDIR" -WebView2Bootstrapper "$INSTDIR\MicrosoftEdgeWebview2Setup.exe"' $UpgradePrepareExit
+  webview2_done:
 
   WriteRegStr HKCU "Software\UsagePanel" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\UsagePanel" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "Software\UsagePanel" "Architecture" "win-x64"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\UsagePanel" "DisplayName" "Usage Panel"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\UsagePanel" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\UsagePanel" "Publisher" "Super ZT"
@@ -45,6 +90,7 @@ Section "Usage Panel" SEC_MAIN
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\UsagePanel" "NoRepair" 1
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
+  ; Recreate shortcuts through current-user shell folders (includes OneDrive Desktop).
   CreateDirectory "$SMPROGRAMS\Usage Panel"
   CreateShortCut "$DESKTOP\Usage Panel.lnk" "$INSTDIR\UsagePanel.exe" "" "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Usage Panel\Usage Panel.lnk" "$INSTDIR\UsagePanel.exe" "" "$INSTDIR\usage-panel.ico" 0 SW_SHOWNORMAL

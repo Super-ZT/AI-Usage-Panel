@@ -8,7 +8,12 @@ The customer package contains only the desktop client. Server administration,
 database migrations, backups, deployment tooling, and private infrastructure
 are deliberately excluded.
 
-## Install on Windows 10 or 11
+## Install on Windows 10 or 11 (64-bit x64)
+
+Supported customer installs are **Windows 10 x64 and Windows 11 x64**. The
+packaged application is a self-contained **win-x64** build. Windows 10 on ARM
+is not supported. Windows 11 on ARM may run it only through x64 emulation;
+that path is not a first-class support claim for 1.0.3.
 
 1. Open the [latest Usage Panel release](https://github.com/Super-ZT/AI-Usage-Panel/releases/latest).
 2. Download `UsagePanel-Setup-<version>.exe` — not the source archive.
@@ -17,11 +22,25 @@ are deliberately excluded.
 5. If asked, create a one-time link code at
    <https://super-zt.com/portal/usage-panel> and paste it into the app.
 
-The installer includes its own Node.js runtime, creates Desktop and Start Menu
-shortcuts, and adds a normal Windows uninstaller. Customers do **not** install
-Node.js and do not use a terminal. Version 1.0.3 is unsigned, so Windows
-SmartScreen may show **Unknown publisher**; compare the download against the
-published `.sha256` file if you want to verify its bytes.
+The installer includes its own Node.js runtime, a self-contained Windows
+application host, and Microsoft’s small Edge WebView2 Evergreen bootstrapper
+(installed only when the runtime is missing). It creates Desktop and Start Menu
+shortcuts through the signed-in user’s shell folders (including OneDrive-managed
+Desktop paths) and adds a normal Windows uninstaller. Customers do **not**
+install Node.js or .NET and do not use a terminal.
+
+Upgrading from public v1.0.2 installs directly over the existing folder: the
+installer stops only Usage Panel-owned processes for that install, removes the
+obsolete hidden launchers (`open-panel.cmd`, `open-panel.vbs`,
+`start-hidden.vbs`), clears a stale stop marker, and refuses a half-upgrade when
+files are locked. Safe enrollment state under `%APPDATA%\usage-panel\` is
+preserved. Closing the Usage Panel window fully exits Usage Panel-owned
+processes; monitoring resumes the next time you open the app.
+
+Version 1.0.3 is unsigned, so Windows SmartScreen may show **Unknown
+publisher**; compare the download against the published `.sha256` file if you
+want to verify its bytes. If the embedded browser runtime is still missing after
+install, install Microsoft Edge WebView2 from Microsoft and reopen Usage Panel.
 
 ## Safety boundaries
 
@@ -92,8 +111,9 @@ Start Menu shortcut.
 Version 1.0.3 replaces the hidden script-and-browser launcher with a real
 Windows application window. The app stays visible while the local dashboard
 starts and shows a plain-English error if a child process fails. Its bounded
-diagnostic file records only fixed startup status names; it never records
-account names, local paths, one-time codes, credentials, prompts, or tokens.
+diagnostic file records only fixed startup status names and timestamps; it never
+records account names, local paths, one-time codes, credentials, prompts,
+tokens, raw exception text, or server/ops content.
 
 Advanced source installs can perform the same enrollment non-interactively:
 

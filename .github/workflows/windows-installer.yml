@@ -35,7 +35,7 @@ jobs:
           Invoke-WebRequest -UseBasicParsing `
             -Uri "https://github.com/Super-ZT/AI-Usage-Panel/releases/download/v1.0.2/UsagePanel-Setup-1.0.2.exe" `
             -OutFile "$env:RUNNER_TEMP\UsagePanel-Setup-1.0.2.exe"
-      - name: Smoke-test visible app, diagnostics, shortcuts, and uninstall
+      - name: Smoke-test true install-over v1.0.2, visible app, diagnostics, shortcuts, uninstall
         shell: powershell
         run: ./installer/windows-smoke.ps1 -Version 1.0.3 -BaselineInstaller "$env:RUNNER_TEMP\UsagePanel-Setup-1.0.2.exe"
       - name: Publish installer artifact
@@ -45,6 +45,8 @@ jobs:
           path: |
             dist/UsagePanel-Setup-1.0.3.exe
             dist/UsagePanel-Setup-1.0.3.exe.sha256
+            dist/UsagePanel-Setup-1.0.3.exe.evidence.txt
             installer/RELEASE_NOTES.md
+            docs/evidence/OPUS_INTEGRATION_HANDOFF.md
           if-no-files-found: error
           retention-days: 30

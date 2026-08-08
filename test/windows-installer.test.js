@@ -134,10 +134,73 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /visible_window_ok/);
   assert.match(windowsSmoke, /function Wait-PathRemoved/);
   assert.match(windowsSmoke, /Wait-PathRemoved -Path \$InstallDir/);
-  assert.match(windowsSmoke, /panel_visible_launch_diagnostics_shortcuts_uninstall_ok/);
+  assert.match(windowsSmoke, /true_install_over_v102_visible_launch_diagnostics_shortcuts_uninstall_ok|panel_visible_launch_diagnostics_shortcuts_uninstall_ok/);
   assert.match(windowsSmoke, /uninstall_residual=/);
   assert.doesNotMatch(windowsSmoke, /\$Path:/,
     'PowerShell variables immediately before a colon must use braced syntax');
+
+
+  // Grok integration base: true upgrade-over-v1.0.2, WebView2 pin, x64 honesty
+  assert.match(nsi, /upgrade-prepare\.ps1/,
+    'NSIS must invoke the upgrade prepare helper before copying files');
+  assert.match(nsi, /Delete "\$INSTDIR\\open-panel\.cmd"/);
+  assert.match(nsi, /Delete "\$INSTDIR\\open-panel\.vbs"/);
+  assert.match(nsi, /Delete "\$INSTDIR\\start-hidden\.vbs"/);
+  assert.match(nsi, /MicrosoftEdgeWebview2Setup\.exe/,
+    'installer must reference the WebView2 bootstrapper when present');
+  assert.match(nsi, /Architecture" "win-x64"/);
+  assert.match(nsi, /half-upgrade|partial upgrade|could not prepare the install folder/i);
+
+  const upgradePrepare = read('installer/upgrade-prepare.ps1');
+  assert.match(upgradePrepare, /Stop-Process/);
+  assert.match(upgradePrepare, /open-panel\.cmd/);
+  assert.match(upgradePrepare, /open-panel\.vbs/);
+  assert.match(upgradePrepare, /start-hidden\.vbs/);
+  assert.match(upgradePrepare, /refresher\\?\.js/);
+  assert.match(upgradePrepare, /Test-WebView2Installed|EdgeUpdate\\Clients/);
+  assert.match(upgradePrepare, /MicrosoftEdgeWebview2Setup|WebView2Bootstrapper/);
+  assert.match(upgradePrepare, /install directory is locked|not writable/i);
+
+  assert.match(build, /WebView2Sha256|webview2/i);
+  assert.match(build, /e99838c51bb3379b244654aa77e33032d42fc2b5d224c5babce432d9fd3dcb28/);
+  assert.match(build, /MicrosoftEdgeWebview2Setup\.exe/);
+  assert.match(build, /webview2-bootstrapper\.provenance\.txt/);
+  assert.match(build, /win-x64/);
+  assert.match(build, /UsagePanel-Setup-\$Version\.exe\.evidence\.txt/);
+
+  assert.match(windowsSmoke, /baseline_v102_left_installed=true/,
+    'smoke must leave public v1.0.2 installed for a true install-over');
+  assert.match(windowsSmoke, /install_over_v102=stale_launchers_removed/);
+  assert.match(windowsSmoke, /Assert-NoStaleLaunchers|stale launcher remained after upgrade/);
+  assert.match(windowsSmoke, /enrollment_preserved=true|enrollment state/);
+  assert.match(windowsSmoke, /PORT_IN_USE|port_conflict/);
+  assert.match(windowsSmoke, /single_instance_ok|SINGLE_INSTANCE/);
+  assert.match(windowsSmoke, /FULL_EXIT_ON_CLOSE|full_exit_on_close/);
+  assert.match(windowsSmoke, /PAYLOAD_MISSING|corrupt_missing_payload/);
+  assert.match(windowsSmoke, /staged_app_assertion/);
+  assert.match(windowsSmoke, /GetFolderPath\([^\n]*DesktopDirectory/);
+  assert.match(windowsSmoke, /shell_folders=desktop:/);
+  assert.match(windowsSmoke, /Assert-DiagnosticsSanitized|non-status data/);
+  // True install-over: after baseline red proof, must not uninstall before candidate install
+  const baselineBlock = windowsSmoke.split('if ($BaselineInstaller)')[1] || '';
+  const baselineSection = baselineBlock.split('Remove-Item $DiagnosticDir')[0] || baselineBlock;
+  assert.doesNotMatch(baselineSection, /Invoke-Uninstall/,
+    'true install-over must not uninstall v1.0.2 before installing 1.0.3');
+
+  const releaseNotes = read('installer/RELEASE_NOTES.md');
+  assert.match(releaseNotes, /Windows 10 x64 and Windows 11 x64/);
+  assert.match(releaseNotes, /Windows 10 on ARM/);
+  assert.match(releaseNotes, /WebView2/);
+  assert.match(releaseNotes, /open-panel\.cmd/);
+  assert.match(releaseNotes, /fully exits all Usage Panel-owned processes/i);
+  assert.match(releaseNotes, /Unknown publisher/);
+
+  const readme = read('README.md');
+  assert.match(readme, /64-bit x64|win-x64/);
+  assert.match(readme, /WebView2/);
+  assert.match(readme, /fully exits Usage Panel-owned processes|fully exit/);
+
+  assert.match(uninstallHelper, /open-panel\\?\.vbs|start-hidden\\?\.vbs/);
 
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.version, '1.0.3');

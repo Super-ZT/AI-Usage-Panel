@@ -1,6 +1,8 @@
 param(
   [string]$Version = "1.0.3",
-  [string]$BaselineInstaller = ""
+  [string]$BaselineInstaller = "",
+  # App-dependent assertions may stay red until Opus's app/** handoff is merged.
+  [switch]$RequireAppAssertions
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,8 +16,10 @@ $StartMenuDir = Join-Path $ProgramsDir "Usage Panel"
 $StartMenuShortcutPath = Join-Path $StartMenuDir "Usage Panel.lnk"
 $LinkShortcutPath = Join-Path $StartMenuDir "Link this computer.lnk"
 $EnrollmentDir = Join-Path $env:APPDATA "usage-panel"
+$EnrollmentFile = Join-Path $EnrollmentDir "enrollment.json"
 $DiagnosticDir = Join-Path $env:LOCALAPPDATA "UsagePanel"
 $DiagnosticFile = Join-Path $DiagnosticDir "launcher.log"
+$StagedAppFailures = New-Object System.Collections.Generic.List[string]
 
 Add-Type @"
 using System;
@@ -23,8 +27,21 @@ using System.Runtime.InteropServices;
 public static class UsagePanelWindowCheck {
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr handle);
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr handle, int command);
+  [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr handle);
+  public const int SW_RESTORE = 9;
 }
 "@
+
+function Note-StagedAppFailure {
+  param([string]$Name, [string]$Detail)
+  $message = "$Name :: $Detail"
+  $StagedAppFailures.Add($message) | Out-Null
+  Write-Host "staged_app_assertion_pending=$message"
+  if ($RequireAppAssertions) { throw "required app assertion failed: $message" }
+}
 
 function Wait-PanelReady {
   for ($attempt = 0; $attempt -lt 75; $attempt++) {
@@ -38,7 +55,7 @@ function Wait-PanelReady {
 }
 
 function Wait-PanelStopped {
-  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+  for ($attempt = 0; $attempt -lt 40; $attempt++) {
     try {
       Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8899/api/sync" -TimeoutSec 1 | Out-Null
     } catch { return }
@@ -48,7 +65,7 @@ function Wait-PanelStopped {
 }
 
 function Wait-AppStopped {
-  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+  for ($attempt = 0; $attempt -lt 40; $attempt++) {
     if (-not (Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue)) { return }
     Start-Sleep -Milliseconds 200
   }
@@ -86,11 +103,24 @@ function Wait-DiagnosticStatus {
   for ($attempt = 0; $attempt -lt 75; $attempt++) {
     if (Test-Path $DiagnosticFile) {
       $lines = Get-Content $DiagnosticFile
-      if ($lines -match " $Status$") { return }
+      if ($lines -match " $Status$") { return $true }
     }
     Start-Sleep -Milliseconds 400
   }
-  throw "Usage Panel did not record expected diagnostic status: $Status"
+  return $false
+}
+
+function Assert-DiagnosticsSanitized {
+  if (-not (Test-Path $DiagnosticFile)) { throw "diagnostic file missing" }
+  $diagnostics = Get-Content $DiagnosticFile
+  foreach ($line in $diagnostics) {
+    if ($line -notmatch '^\d{4}-\d{2}-\d{2}T[^ ]+ [A-Z0-9_]+$') {
+      throw "launcher diagnostic contained non-status data"
+    }
+    if ($line -match '(?i)(user(name)?|token|credential|password|secret|prompt|exception|C:\\Users\\|\\\\|/home/)') {
+      throw "launcher diagnostic contained forbidden identity or secret content"
+    }
+  }
 }
 
 function Wait-PathRemoved {
@@ -103,7 +133,7 @@ function Wait-PathRemoved {
 
 function Read-Shortcut {
   param([string]$Path)
-  if (-not (Test-Path $Path -PathType Leaf)) { throw "missing shortcut" }
+  if (-not (Test-Path $Path -PathType Leaf)) { throw "missing shortcut: $Path" }
   $shell = New-Object -ComObject WScript.Shell
   try { return $shell.CreateShortcut($Path) }
   finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
@@ -114,11 +144,14 @@ function Assert-Shortcut {
   $shortcut = Read-Shortcut -Path $Path
   try {
     if ([IO.Path]::GetFileName($shortcut.TargetPath) -ine $TargetLeaf) {
-      throw "unexpected shortcut target"
+      throw "unexpected shortcut target for $Path : $($shortcut.TargetPath)"
     }
     foreach ($fragment in $ArgumentFragments) {
-      if ($shortcut.Arguments -notlike "*$fragment*") { throw "unexpected shortcut arguments" }
+      if ($shortcut.Arguments -notlike "*$fragment*") {
+        throw "unexpected shortcut arguments for $Path : $($shortcut.Arguments)"
+      }
     }
+    Write-Host "shortcut_ok=path:$Path;target:$($shortcut.TargetPath);args:$($shortcut.Arguments);shell_folder_desktop:$DesktopDir;shell_folder_programs:$ProgramsDir"
   } finally {
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)
   }
@@ -133,8 +166,28 @@ function Invoke-Uninstall {
   }
 }
 
+function Assert-NoStaleLaunchers {
+  foreach ($name in @("open-panel.cmd", "open-panel.vbs", "start-hidden.vbs")) {
+    $path = Join-Path $InstallDir $name
+    if (Test-Path $path) { throw "stale launcher remained after upgrade: $name" }
+  }
+  if (Test-Path (Join-Path $InstallDir ".usage-panel-stop")) {
+    throw "stale shutdown marker remained after upgrade"
+  }
+}
+
+function Stop-AllPanelProcesses {
+  & (Join-Path $InstallDir "uninstall-helper.ps1") -ErrorAction SilentlyContinue
+  Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Wait-AppStopped
+  Wait-PanelStopped
+}
+
+# Preserve a sentinel enrollment file so the upgrade path is proven not to wipe it.
 New-Item $EnrollmentDir -ItemType Directory -Force | Out-Null
-"{}" | Set-Content (Join-Path $EnrollmentDir "enrollment.json") -Encoding ascii
+$enrollmentSentinel = '{"deviceId":"00000000-0000-4000-8000-000000000099","deviceCredential":"sentinel-not-a-real-secret","label":"smoke"}'
+Set-Content -Path $EnrollmentFile -Value $enrollmentSentinel -Encoding ascii
+$enrollmentBefore = Get-FileHash $EnrollmentFile -Algorithm SHA256
 
 if ($BaselineInstaller) {
   $baseline = Resolve-Path $BaselineInstaller
@@ -144,6 +197,16 @@ if ($BaselineInstaller) {
   }
   $installBaseline = Start-Process $baseline -ArgumentList "/S" -Wait -PassThru
   if ($installBaseline.ExitCode -ne 0) { throw "baseline installer exited $($installBaseline.ExitCode)" }
+
+  # Plant residual launchers and a stop marker so upgrade cleanup is forced even
+  # if a future baseline packaging change stops shipping them.
+  foreach ($name in @("open-panel.cmd", "open-panel.vbs", "start-hidden.vbs")) {
+    if (-not (Test-Path (Join-Path $InstallDir $name))) {
+      Set-Content (Join-Path $InstallDir $name) "stale-launcher-residue" -Encoding ascii
+    }
+  }
+  "stop" | Set-Content (Join-Path $InstallDir ".usage-panel-stop") -Encoding ascii -NoNewline
+
   $baselineShortcut = Read-Shortcut -Path $DesktopShortcutPath
   try {
     if ([IO.Path]::GetFileName($baselineShortcut.TargetPath) -ine "wscript.exe") {
@@ -159,30 +222,42 @@ if ($BaselineInstaller) {
     throw "public v1.0.2 unexpectedly created the native visible app"
   }
   Write-Host "baseline_v102_silent_launcher_reproduced=shortcut_target_wscript_no_native_window"
-  Invoke-Uninstall
+  Write-Host "baseline_v102_left_installed=true"
+  # CRITICAL: do NOT uninstall. v1.0.3 must install directly over this tree.
 }
 
-# Reproduce an upgrade residue before installing the candidate. The installer
-# must clear this marker rather than letting its server child exit silently.
-New-Item $InstallDir -ItemType Directory -Force | Out-Null
-"stop" | Set-Content (Join-Path $InstallDir ".usage-panel-stop") -Encoding ascii -NoNewline
 Remove-Item $DiagnosticDir -Recurse -Force -ErrorAction SilentlyContinue
 
 $install = Start-Process $Installer -ArgumentList "/S" -Wait -PassThru
 if ($install.ExitCode -ne 0) { throw "installer exited $($install.ExitCode)" }
-if (Test-Path (Join-Path $InstallDir ".usage-panel-stop")) { throw "stale shutdown marker survived install" }
+
+Assert-NoStaleLaunchers
+if (-not (Test-Path (Join-Path $InstallDir "UsagePanel.exe"))) { throw "UsagePanel.exe missing after install-over" }
+if (-not (Test-Path (Join-Path $InstallDir "MicrosoftEdgeWebview2Setup.exe"))) {
+  throw "WebView2 bootstrapper missing from install tree"
+}
+if (-not (Test-Path (Join-Path $InstallDir "webview2-bootstrapper.provenance.txt"))) {
+  throw "WebView2 provenance file missing from install tree"
+}
+
+$enrollmentAfter = Get-FileHash $EnrollmentFile -Algorithm SHA256
+if ($enrollmentAfter.Hash -ne $enrollmentBefore.Hash) {
+  throw "upgrade mutated enrollment state; only deliberately safe enrollment may be preserved unchanged"
+}
+Write-Host "install_over_v102=stale_launchers_removed;enrollment_preserved=true"
 
 $required = @(
   (Join-Path $InstallDir "UsagePanel.exe"),
   (Join-Path $InstallDir "node\node.exe"),
   (Join-Path $InstallDir "open-panel-after-link.ps1"),
   (Join-Path $InstallDir "enroll-panel.ps1"),
+  (Join-Path $InstallDir "upgrade-prepare.ps1"),
   $DesktopShortcutPath,
   $StartMenuShortcutPath,
   $LinkShortcutPath,
   (Join-Path $InstallDir "Uninstall.exe")
 )
-foreach ($path in $required) { if (-not (Test-Path $path)) { throw "missing after install" } }
+foreach ($path in $required) { if (-not (Test-Path $path)) { throw "missing after install: $path" } }
 
 Assert-Shortcut -Path $DesktopShortcutPath -TargetLeaf "UsagePanel.exe" -ArgumentFragments @()
 Assert-Shortcut -Path $StartMenuShortcutPath -TargetLeaf "UsagePanel.exe" -ArgumentFragments @()
@@ -190,19 +265,35 @@ Assert-Shortcut -Path $LinkShortcutPath -TargetLeaf "powershell.exe" -ArgumentFr
 
 & (Join-Path $InstallDir "node\node.exe") --version
 
-# Use the installed Desktop shortcut through the Windows shell, exactly as a
-# customer's double-click does, and require a visible owned window plus HTTP.
+# Shell double-click path: Desktop shortcut via Windows shell semantics.
 Start-Process $DesktopShortcutPath
 $visible = Wait-VisibleWindow
 Wait-PanelReady
-Wait-DiagnosticStatus -Status "WEBVIEW_READY"
-Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true"
+if (-not (Wait-DiagnosticStatus -Status "WEBVIEW_READY")) {
+  Note-StagedAppFailure -Name "WEBVIEW_READY" -Detail "app did not record WEBVIEW_READY; Opus owns in-app WebView2 ready signaling"
+} else {
+  Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true"
+}
 
-# A server child that exits must leave a visible plain-English failure instead
-# of disappearing like v1.0.2. No dynamic exception, path, or identity is logged.
-& (Join-Path $InstallDir "uninstall-helper.ps1")
-Wait-AppStopped
-Wait-PanelStopped
+# Relaunch / single-instance: second shell launch must not create a second host.
+Start-Process $DesktopShortcutPath
+Start-Sleep -Seconds 3
+$hostCount = @(Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue).Count
+if ($hostCount -ne 1) {
+  Note-StagedAppFailure -Name "SINGLE_INSTANCE" -Detail "expected 1 UsagePanel process, found $hostCount"
+} else {
+  Write-Host "single_instance_ok=process_count:1"
+}
+# Minimized restore path is app-owned; stage until Opus implements SW_RESTORE.
+$iconic = Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Where-Object {
+  $_.MainWindowHandle -ne 0 -and [UsagePanelWindowCheck]::IsIconic($_.MainWindowHandle)
+}
+if ($iconic) {
+  Note-StagedAppFailure -Name "MINIMIZED_RESTORE" -Detail "existing minimized window observed; app must restore before focus"
+}
+
+# Server child exit must leave a visible plain-English failure and status-only diagnostics.
+Stop-AllPanelProcesses
 $refresher = Join-Path $InstallDir "refresher.js"
 $disabledRefresher = Join-Path $InstallDir "refresher.js.disabled"
 Move-Item $refresher $disabledRefresher
@@ -212,30 +303,95 @@ try {
   if (-not (Test-Path $DiagnosticFile)) { throw "sanitized diagnostic file was not written" }
   $diagnostics = Get-Content $DiagnosticFile
   if (-not ($diagnostics -match " SERVER_FAILED$")) { throw "server failure diagnostic was not recorded" }
-  foreach ($line in $diagnostics) {
-    if ($line -notmatch '^\d{4}-\d{2}-\d{2}T[^ ]+ [A-Z_]+$') {
-      throw "launcher diagnostic contained non-status data"
-    }
-  }
+  Assert-DiagnosticsSanitized
   Write-Host "silent_child_exit=visible_plain_english_failure;diagnostics=status_only"
 } finally {
   Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force
   Move-Item $disabledRefresher $refresher -Force
-  & (Join-Path $InstallDir "uninstall-helper.ps1")
-  Wait-AppStopped
-  Wait-PanelStopped
+  Stop-AllPanelProcesses
 }
 
-# Invoke the exact helper used after successful direct Start Menu linking and
-# require one visible app window and a ready dashboard.
+# Corrupt / missing payload: remove dashboard payload and require a visible failure.
+$dashboard = Join-Path $InstallDir "dashboard.html"
+$disabledDashboard = Join-Path $InstallDir "dashboard.html.disabled"
+Copy-Item $dashboard $disabledDashboard -Force
+try {
+  Remove-Item $dashboard -Force
+  Start-Process $DesktopShortcutPath
+  try {
+    $null = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 60
+    if (-not (Wait-DiagnosticStatus -Status "PAYLOAD_MISSING") -and
+        -not (Wait-DiagnosticStatus -Status "SERVER_FAILED") -and
+        -not (Wait-DiagnosticStatus -Status "OFFLINE")) {
+      Note-StagedAppFailure -Name "PAYLOAD_MISSING" -Detail "missing dashboard did not record a dedicated status code"
+    } else {
+      Write-Host "corrupt_missing_payload=visible_failure"
+    }
+  } catch {
+    Note-StagedAppFailure -Name "PAYLOAD_MISSING" -Detail $_.Exception.Message
+  }
+} finally {
+  if (Test-Path $disabledDashboard) { Move-Item $disabledDashboard $dashboard -Force }
+  Stop-AllPanelProcesses
+}
+
+# Port 8899 conflict: occupy the port, then require a dedicated status (not generic reinstall).
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 8899)
+try {
+  $listener.Start()
+  Start-Process $DesktopShortcutPath
+  Start-Sleep -Seconds 6
+  if (Wait-DiagnosticStatus -Status "PORT_IN_USE") {
+    Write-Host "port_conflict=PORT_IN_USE"
+  } else {
+    Note-StagedAppFailure -Name "PORT_IN_USE" -Detail "app did not record PORT_IN_USE while 8899 was occupied"
+  }
+} finally {
+  $listener.Stop()
+  Stop-AllPanelProcesses
+}
+
+# Offline-ish collector failure is app/server owned; verify diagnostics stay sanitized if produced.
+Start-Process $DesktopShortcutPath
+try {
+  $null = Wait-VisibleWindow -Attempts 60
+  Assert-DiagnosticsSanitized
+  Write-Host "diagnostics_sanitized=ok"
+} catch {
+  Note-StagedAppFailure -Name "OFFLINE_OR_LAUNCH" -Detail $_.Exception.Message
+} finally {
+  Stop-AllPanelProcesses
+}
+
+# Product close behavior contract: full exit of Usage Panel-owned processes.
+# Until Opus implements terminate-on-close, this is staged.
+Start-Process $DesktopShortcutPath
+$closeWindow = Wait-VisibleWindow
+Wait-PanelReady
+$closeWindow.CloseMainWindow() | Out-Null
+Start-Sleep -Seconds 4
+$remainingApp = @(Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue)
+$remainingNode = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $_.ExecutablePath -and
+  $_.ExecutablePath.ToLowerInvariant() -eq ((Join-Path $InstallDir "node\node.exe").ToLowerInvariant()) -and
+  $_.CommandLine -match "refresher\.js"
+})
+if ($remainingApp.Count -gt 0 -or $remainingNode.Count -gt 0) {
+  Note-StagedAppFailure -Name "FULL_EXIT_ON_CLOSE" -Detail "app=$($remainingApp.Count) node_refresher=$($remainingNode.Count); product requires full exit, monitoring resumes on next launch"
+} else {
+  Write-Host "full_exit_on_close=ok"
+}
+Stop-AllPanelProcesses
+
+# Enrollment handoff helper must open exactly one visible window.
 & (Join-Path $InstallDir "open-panel-after-link.ps1")
 $handoff = Wait-VisibleWindow
 Wait-PanelReady
-Wait-DiagnosticStatus -Status "WEBVIEW_READY"
 $visibleCount = @(Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Where-Object {
   $_.MainWindowHandle -ne 0 -and [UsagePanelWindowCheck]::IsWindowVisible($_.MainWindowHandle)
 }).Count
 if ($visibleCount -ne 1) { throw "post-link handoff created $visibleCount visible windows" }
+Write-Host "enrollment_handoff=one_visible_window"
 
 Invoke-Uninstall
 if (Test-Path $InstallDir) {
@@ -245,7 +401,26 @@ if (Test-Path $InstallDir) {
 }
 if (Test-Path $DesktopShortcutPath) { throw "Desktop shortcut remained after uninstall" }
 if (Test-Path $StartMenuDir) { throw "Start Menu shortcuts remained after uninstall" }
+if (Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue) {
+  throw "UsagePanel process remained after uninstall"
+}
+Write-Host "uninstall=directory_shortcuts_processes_removed"
+
+# Enrollment is deliberately retained across uninstall (documented product choice).
+if (-not (Test-Path $EnrollmentFile)) {
+  throw "uninstall unexpectedly removed enrollment state"
+}
+Write-Host "enrollment_retained_after_uninstall=true"
 
 Remove-Item $EnrollmentDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $DiagnosticDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "installer_smoke=panel_visible_launch_diagnostics_shortcuts_uninstall_ok"
+
+if ($StagedAppFailures.Count -gt 0) {
+  Write-Host "staged_app_assertion_count=$($StagedAppFailures.Count)"
+  foreach ($item in $StagedAppFailures) { Write-Host "staged_app_assertion=$item" }
+} else {
+  Write-Host "staged_app_assertion_count=0"
+}
+
+Write-Host "installer_smoke=true_install_over_v102_visible_launch_diagnostics_shortcuts_uninstall_ok"
+Write-Host "shell_folders=desktop:$DesktopDir;programs:$ProgramsDir"

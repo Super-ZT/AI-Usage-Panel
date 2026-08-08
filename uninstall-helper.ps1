@@ -12,6 +12,16 @@ Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -and $_.CommandLine -match "refresher\.js"
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
+$RootCompare = $PSScriptRoot.ToLowerInvariant()
+Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and
+  $_.CommandLine.ToLowerInvariant().IndexOf($RootCompare) -ge 0 -and (
+    ($_.Name -ieq "wscript.exe" -and $_.CommandLine -match "open-panel\.vbs|start-hidden\.vbs") -or
+    ($_.Name -ieq "cscript.exe" -and $_.CommandLine -match "open-panel\.vbs|start-hidden\.vbs") -or
+    ($_.Name -ieq "cmd.exe" -and $_.CommandLine -match "open-panel\.cmd|start-panel\.cmd")
+  )
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
 function Get-UsagePanelLaunchers {
   @(Get-CimInstance Win32_Process | Where-Object {
     $_.Name -ieq "cmd.exe" -and $_.CommandLine -and
