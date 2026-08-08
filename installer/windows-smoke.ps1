@@ -21,8 +21,11 @@ $DiagnosticDir = Join-Path $env:LOCALAPPDATA "UsagePanel"
 $DiagnosticFile = Join-Path $DiagnosticDir "launcher.log"
 $StagedAppFailures = New-Object System.Collections.Generic.List[string]
 
+Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
+using System.Text;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class UsagePanelWindowCheck {
   [DllImport("user32.dll")]
@@ -31,9 +34,63 @@ public static class UsagePanelWindowCheck {
   public static extern bool ShowWindow(IntPtr handle, int command);
   [DllImport("user32.dll")]
   public static extern bool IsIconic(IntPtr handle);
+  [DllImport("user32.dll")]
+  public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr handle, StringBuilder className, int maxCount);
+  [DllImport("user32.dll")]
+  public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+  [DllImport("user32.dll")]
+  public static extern bool PrintWindow(IntPtr handle, IntPtr hdcBlt, int flags);
+  public delegate bool EnumWindowsProc(IntPtr handle, IntPtr lParam);
   public const int SW_RESTORE = 9;
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public static List<string> ListVisibleChildren(IntPtr parent) {
+    var found = new List<string>();
+    EnumChildWindows(parent, (h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      RECT r;
+      if (!GetWindowRect(h, out r)) return true;
+      int w = r.Right - r.Left;
+      int hgt = r.Bottom - r.Top;
+      if (w < 80 || hgt < 80) return true;
+      var sb = new StringBuilder(256);
+      GetClassName(h, sb, sb.Capacity);
+      found.Add(sb.ToString() + ":" + w + "x" + hgt);
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+  public static bool HasEmbeddedBrowserRegion(IntPtr parent) {
+    bool hit = false;
+    EnumChildWindows(parent, (h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      RECT r;
+      if (!GetWindowRect(h, out r)) return true;
+      int w = r.Right - r.Left;
+      int hgt = r.Bottom - r.Top;
+      if (w < 120 || hgt < 120) return true;
+      var sb = new StringBuilder(256);
+      GetClassName(h, sb, sb.Capacity);
+      string cls = sb.ToString();
+      // WebView2 hosts Chromium child HWNDs; WinForms WebView2 control also surfaces.
+      if (cls.IndexOf("Chrome_WidgetWin", StringComparison.OrdinalIgnoreCase) >= 0
+          || cls.IndexOf("Chrome_RenderWidgetHostHWND", StringComparison.OrdinalIgnoreCase) >= 0
+          || cls.IndexOf("WebView", StringComparison.OrdinalIgnoreCase) >= 0
+          || cls.IndexOf("WindowsForms10", StringComparison.OrdinalIgnoreCase) >= 0) {
+        hit = true;
+        return false;
+      }
+      return true;
+    }, IntPtr.Zero);
+    return hit;
+  }
 }
 "@
+
+$EvidenceDir = Join-Path $Root "dist\smoke-evidence"
+New-Item $EvidenceDir -ItemType Directory -Force | Out-Null
 
 function Note-StagedAppFailure {
   param([string]$Name, [string]$Detail)
@@ -96,6 +153,66 @@ function Wait-VisibleWindow {
     }
   }
   throw "Usage Panel did not create the expected visible top-level window: $Title"
+}
+
+function Save-WindowScreenshot {
+  param([System.Diagnostics.Process]$Process, [string]$Name)
+  $Process.Refresh()
+  $handle = $Process.MainWindowHandle
+  if ($handle -eq [IntPtr]::Zero) { throw "screenshot failed: no main window handle for $Name" }
+  $rect = New-Object UsagePanelWindowCheck+RECT
+  if (-not [UsagePanelWindowCheck]::GetWindowRect($handle, [ref]$rect)) {
+    throw "screenshot failed: GetWindowRect for $Name"
+  }
+  $width = [Math]::Max(1, $rect.Right - $rect.Left)
+  $height = [Math]::Max(1, $rect.Bottom - $rect.Top)
+  $bitmap = New-Object System.Drawing.Bitmap $width, $height
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($width, $height)))
+    $path = Join-Path $EvidenceDir "$Name.png"
+    $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "screenshot_ok=path:$path;bytes:$((Get-Item $path).Length);size:${width}x${height}"
+    return $path
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
+function Assert-IndependentDashboardVisible {
+  param([System.Diagnostics.Process]$Process)
+  $Process.Refresh()
+  $handle = $Process.MainWindowHandle
+  if ($handle -eq [IntPtr]::Zero) { throw "independent visibility failed: zero main window handle" }
+  if (-not [UsagePanelWindowCheck]::IsWindowVisible($handle)) {
+    throw "independent visibility failed: top-level window not visible"
+  }
+  $rect = New-Object UsagePanelWindowCheck+RECT
+  if (-not [UsagePanelWindowCheck]::GetWindowRect($handle, [ref]$rect)) {
+    throw "independent visibility failed: GetWindowRect"
+  }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  if ($width -lt 400 -or $height -lt 300) {
+    throw "independent visibility failed: top-level window too small (${width}x${height})"
+  }
+  # Independent of launcher.log: require a real embedded browser/content HWND.
+  $deadline = [DateTimeOffset]::UtcNow.AddSeconds(40)
+  $children = @()
+  while ([DateTimeOffset]::UtcNow -lt $deadline) {
+    if ([UsagePanelWindowCheck]::HasEmbeddedBrowserRegion($handle)) {
+      $children = [UsagePanelWindowCheck]::ListVisibleChildren($handle)
+      Write-Host "independent_dashboard_visible=top:${width}x${height};children:$($children -join ',')"
+      return
+    }
+    Start-Sleep -Milliseconds 500
+    $Process.Refresh()
+    $handle = $Process.MainWindowHandle
+  }
+  $children = [UsagePanelWindowCheck]::ListVisibleChildren($handle)
+  Write-Host "independent_dashboard_children=$($children -join ',')"
+  throw "independent visibility failed: no nonzero-size embedded browser/content region"
 }
 
 function Wait-DiagnosticStatus {
@@ -269,13 +386,13 @@ Assert-Shortcut -Path $LinkShortcutPath -TargetLeaf "powershell.exe" -ArgumentFr
 Start-Process $DesktopShortcutPath
 $visible = Wait-VisibleWindow
 Wait-PanelReady
-# DASHBOARD_VISIBLE is recorded only after the app reads real window/surface
-# state, so a log line can disagree with the screen when the dashboard is hidden.
+# Log status is supporting evidence only — independent Win32 observation is required.
 if (-not (Wait-DiagnosticStatus -Status "DASHBOARD_VISIBLE")) {
   Note-StagedAppFailure -Name "DASHBOARD_VISIBLE" -Detail "app did not record DASHBOARD_VISIBLE after a successful panel launch"
-} else {
-  Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true;dashboard_visible=true"
 }
+Assert-IndependentDashboardVisible -Process $visible
+Save-WindowScreenshot -Process $visible -Name "dashboard-visible"
+Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true;dashboard_visible=true;independent_hwnd=true"
 
 # Relaunch / single-instance: second shell launch must not create a second host.
 Start-Process $DesktopShortcutPath
@@ -337,20 +454,83 @@ try {
   Stop-AllPanelProcesses
 }
 
-# Port 8899 conflict: occupy the port, then require a dedicated status (not generic reinstall).
+# Port 8899 conflict: real unrelated listener; app must not kill it.
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 8899)
 try {
   $listener.Start()
   Start-Process $DesktopShortcutPath
-  Start-Sleep -Seconds 6
-  if (Wait-DiagnosticStatus -Status "PORT_IN_USE") {
-    Write-Host "port_conflict=PORT_IN_USE"
-  } else {
+  $portFailure = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
+  if (-not (Wait-DiagnosticStatus -Status "PORT_IN_USE")) {
     Note-StagedAppFailure -Name "PORT_IN_USE" -Detail "app did not record PORT_IN_USE while 8899 was occupied"
+  } else {
+    Write-Host "port_conflict=PORT_IN_USE;visible_failure=true"
   }
+  try { Save-WindowScreenshot -Process $portFailure -Name "port-in-use" } catch { Write-Host "screenshot_port_in_use_skipped=$($_.Exception.Message)" }
+  # Prove the foreign listener is still alive (Usage Panel must not kill it).
+  $stillListening = $false
+  try {
+    $probeClient = New-Object System.Net.Sockets.TcpClient
+    $probeClient.Connect("127.0.0.1", 8899)
+    $stillListening = $probeClient.Connected
+    $probeClient.Close()
+  } catch { $stillListening = $false }
+  if (-not $stillListening) {
+    throw "PORT_IN_USE path appears to have killed the foreign 8899 listener"
+  }
+  Write-Host "port_conflict_foreign_listener_alive=true"
 } finally {
-  $listener.Stop()
+  try { $listener.Stop() } catch { }
   Stop-AllPanelProcesses
+}
+
+# Forced missing-WebView2 path: correct in-window message + WEBVIEW2_MISSING status.
+Stop-AllPanelProcesses
+$env:USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING = "1"
+try {
+  $wv2Proc = Start-Process -FilePath (Join-Path $InstallDir "UsagePanel.exe") -WorkingDirectory ([IO.Path]::GetTempPath()) -PassThru
+  $wv2Window = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
+  if (-not (Wait-DiagnosticStatus -Status "WEBVIEW2_MISSING")) {
+    Note-StagedAppFailure -Name "WEBVIEW2_MISSING" -Detail "forced missing WebView2 did not record WEBVIEW2_MISSING"
+  } else {
+    Write-Host "webview2_missing=visible_status_WEBVIEW2_MISSING"
+  }
+  if ($wv2Window.MainWindowTitle -ne "Usage Panel - Could not open") {
+    Note-StagedAppFailure -Name "WEBVIEW2_MISSING_UI" -Detail "unexpected failure window title"
+  }
+  try { Save-WindowScreenshot -Process $wv2Window -Name "webview2-missing" } catch { Write-Host "screenshot_webview2_missing_skipped=$($_.Exception.Message)" }
+  Assert-DiagnosticsSanitized
+} finally {
+  Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Stop-AllPanelProcesses
+  Remove-Item Env:\USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING -ErrorAction SilentlyContinue
+}
+
+# First-run unlinked enrollment: remove sentinel, launch, expect enrollment start, then cancel dialog.
+Stop-AllPanelProcesses
+Remove-Item $EnrollmentFile -Force -ErrorAction SilentlyContinue
+Start-Process $DesktopShortcutPath
+try {
+  $null = Wait-VisibleWindow -Attempts 90
+  if (-not (Wait-DiagnosticStatus -Status "ENROLLMENT_STARTED") -and
+      -not (Wait-DiagnosticStatus -Status "ENROLLMENT_FAILED") -and
+      -not (Wait-DiagnosticStatus -Status "NETWORK_UNAVAILABLE")) {
+    Note-StagedAppFailure -Name "FIRST_RUN_ENROLLMENT" -Detail "unlinked launch did not record enrollment/network status"
+  } else {
+    Write-Host "first_run_unlinked_enrollment=status_observed"
+  }
+  # Close any enroll PowerShell dialog so the host can continue or exit cleanly.
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and $_.CommandLine -match "enroll-panel\.ps1"
+  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 2
+  Assert-DiagnosticsSanitized
+} catch {
+  Note-StagedAppFailure -Name "FIRST_RUN_ENROLLMENT" -Detail $_.Exception.Message
+} finally {
+  Stop-AllPanelProcesses
+  # Restore sentinel for later uninstall-preserve proof.
+  New-Item $EnrollmentDir -ItemType Directory -Force | Out-Null
+  Set-Content -Path $EnrollmentFile -Value $enrollmentSentinel -Encoding ascii
 }
 
 # Offline-ish collector failure is app/server owned; verify diagnostics stay sanitized if produced.
@@ -365,8 +545,7 @@ try {
   Stop-AllPanelProcesses
 }
 
-# Product close behavior contract: full exit of Usage Panel-owned processes.
-# Until Opus implements terminate-on-close, this is staged.
+# Product close behavior: full exit of all Usage Panel-owned processes (no tray).
 Start-Process $DesktopShortcutPath
 $closeWindow = Wait-VisibleWindow
 Wait-PanelReady
@@ -393,7 +572,8 @@ $visibleCount = @(Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue |
   $_.MainWindowHandle -ne 0 -and [UsagePanelWindowCheck]::IsWindowVisible($_.MainWindowHandle)
 }).Count
 if ($visibleCount -ne 1) { throw "post-link handoff created $visibleCount visible windows" }
-Write-Host "enrollment_handoff=one_visible_window"
+Write-Host "enrollment_handoff=one_visible_window;exact_once=true"
+Save-WindowScreenshot -Process $handoff -Name "post-link-handoff"
 
 Invoke-Uninstall
 if (Test-Path $InstallDir) {

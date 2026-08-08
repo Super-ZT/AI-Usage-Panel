@@ -22,7 +22,16 @@ $WebView2Official = "https://developer.microsoft.com/microsoft-edge/webview2/"
 Remove-Item $Dist -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $Stage -ItemType Directory -Force | Out-Null
 
-$HostPublish = Join-Path $env:RUNNER_TEMP "usage-panel-host"
+# Prefer RUNNER_TEMP on GitHub Actions, but fall back so local/dev builds work
+# outside Actions-only paths (Chief gate: not GHA-only).
+$WorkRoot = $env:RUNNER_TEMP
+if (-not $WorkRoot) { $WorkRoot = $env:TEMP }
+if (-not $WorkRoot) { $WorkRoot = $env:TMP }
+if (-not $WorkRoot) { $WorkRoot = Join-Path $Root ".scratch\windows-build" }
+New-Item $WorkRoot -ItemType Directory -Force | Out-Null
+Write-Host "build_work_root=$WorkRoot"
+
+$HostPublish = Join-Path $WorkRoot "usage-panel-host"
 Remove-Item $HostPublish -Recurse -Force -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $Root "app\UsagePanel.csproj") `
   --configuration Release --runtime win-x64 --self-contained true `
@@ -54,19 +63,19 @@ foreach ($relative in $clientFiles) {
 # Package the upgrade helper so uninstall/repair tooling can reuse it if needed.
 Copy-Item (Join-Path $PSScriptRoot "upgrade-prepare.ps1") $Stage -Force
 
-$Download = Join-Path $env:RUNNER_TEMP $NodeArchive
+$Download = Join-Path $WorkRoot $NodeArchive
 Invoke-WebRequest -UseBasicParsing -Uri $NodeUrl -OutFile $Download
 $ActualNodeHash = (Get-FileHash $Download -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ActualNodeHash -ne $NodeSha256) {
   throw "Portable Node archive checksum mismatch."
 }
 
-$Extracted = Join-Path $env:RUNNER_TEMP "usage-panel-node"
+$Extracted = Join-Path $WorkRoot "usage-panel-node"
 Remove-Item $Extracted -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive $Download -DestinationPath $Extracted -Force
 Copy-Item (Join-Path $Extracted "node-v$NodeVersion-win-x64") (Join-Path $Stage "node") -Recurse -Force
 
-$WebView2Download = Join-Path $env:RUNNER_TEMP $WebView2File
+$WebView2Download = Join-Path $WorkRoot $WebView2File
 Invoke-WebRequest -UseBasicParsing -Uri $WebView2Url -OutFile $WebView2Download
 $ActualWebView2Hash = (Get-FileHash $WebView2Download -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ActualWebView2Hash -ne $WebView2Sha256) {

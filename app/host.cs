@@ -278,6 +278,16 @@ internal sealed class MainForm : Form
     /// </summary>
     private static bool WebView2Available()
     {
+        // CI smoke-only force: proves the in-window WEBVIEW2_MISSING path without
+        // uninstalling the runner runtime. Not used by customer shortcuts.
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         try
         {
             return !string.IsNullOrEmpty(CoreWebView2Environment.GetAvailableBrowserVersionString());

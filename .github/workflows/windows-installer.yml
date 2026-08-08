@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-setup-exe:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,21 +24,47 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Check Windows packaging contracts
         run: node test/windows-installer.test.js
+      - name: App unit tests
+        shell: powershell
+        run: |
+          dotnet test app/tests/UsagePanel.Core.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "app unit tests failed" }
+      - name: NuGet vulnerability audit (shipped app)
+        shell: powershell
+        run: |
+          # Fails closed when any known vulnerable package is resolved for the host.
+          $out = dotnet list app/UsagePanel.csproj package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Host $out
+          if ($out -match "(?i)has the following vulnerable packages|Severity\s*:\s*(Critical|High|Moderate|Low)") {
+            throw "NuGet vulnerability audit found vulnerable packages in the shipped app project"
+          }
+          Write-Host "nuget_audit=no_vulnerable_packages_reported"
       - name: Install NSIS
         run: choco install nsis --no-progress -y
-      - name: Build Setup.exe with bundled Node
+      - name: Build Setup.exe with bundled Node (non-GHA temp fallback exercised via TEMP)
         shell: powershell
-        run: ./installer/build-windows.ps1 -Version 1.0.3
+        run: |
+          # Prove the build does not require a GitHub-Actions-only path layout.
+          $env:RUNNER_TEMP = ""
+          ./installer/build-windows.ps1 -Version 1.0.3
       - name: Download the exact failed public v1.0.2 baseline
         shell: powershell
         run: |
           Invoke-WebRequest -UseBasicParsing `
             -Uri "https://github.com/Super-ZT/AI-Usage-Panel/releases/download/v1.0.2/UsagePanel-Setup-1.0.2.exe" `
-            -OutFile "$env:RUNNER_TEMP\UsagePanel-Setup-1.0.2.exe"
-      - name: Smoke-test true install-over v1.0.2, visible app, diagnostics, shortcuts, uninstall
+            -OutFile "$env:TEMP\UsagePanel-Setup-1.0.2.exe"
+          $hash = (Get-FileHash "$env:TEMP\UsagePanel-Setup-1.0.2.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "991800b7d5e20374a6014254fb45d2ba9b6e2ea44b1115e5b6c05bc19875598e") {
+            throw "public v1.0.2 baseline checksum mismatch: $hash"
+          }
+      - name: Smoke-test true install-over v1.0.2 with hard app assertions
         shell: powershell
-        run: ./installer/windows-smoke.ps1 -Version 1.0.3 -BaselineInstaller "$env:RUNNER_TEMP\UsagePanel-Setup-1.0.2.exe"
-      - name: Publish installer artifact
+        run: |
+          ./installer/windows-smoke.ps1 `
+            -Version 1.0.3 `
+            -BaselineInstaller "$env:TEMP\UsagePanel-Setup-1.0.2.exe" `
+            -RequireAppAssertions
+      - name: Publish installer + evidence artifacts
         uses: actions/upload-artifact@v4
         with:
           name: UsagePanel-Setup-1.0.3
@@ -46,6 +72,7 @@ jobs:
             dist/UsagePanel-Setup-1.0.3.exe
             dist/UsagePanel-Setup-1.0.3.exe.sha256
             dist/UsagePanel-Setup-1.0.3.exe.evidence.txt
+            dist/smoke-evidence/**
             installer/RELEASE_NOTES.md
             docs/evidence/OPUS_INTEGRATION_HANDOFF.md
           if-no-files-found: error

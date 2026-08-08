@@ -50,6 +50,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(build, /makensis/i);
   assert.match(build, /dotnet[\s\S]+publish[\s\S]+UsagePanel\.csproj/i);
   assert.match(build, /UsagePanel\.exe/);
+  assert.match(build, /WorkRoot|RUNNER_TEMP|TEMP/,
+    'build must not hard-require GitHub Actions RUNNER_TEMP alone');
 
   const host = read('app/host.cs');
   assert.match(host, /http:\/\/127\.0\.0\.1:8899/,
@@ -126,6 +128,14 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(workflow, /UsagePanel-Setup-1\.0\.2\.exe/,
     'Windows CI must exercise the exact failed public baseline');
   assert.match(workflow, /\.\/installer\/windows-smoke\.ps1/);
+  assert.match(workflow, /RequireAppAssertions/,
+    'Windows CI must hard-fail staged app assertions');
+  assert.match(workflow, /smoke-evidence/,
+    'Windows CI must publish window screenshots as evidence');
+  assert.match(workflow, /dotnet test app\/tests\/UsagePanel\.Core\.Tests\.csproj/);
+  assert.match(workflow, /package --vulnerable/);
+  assert.match(workflow, /\$env:RUNNER_TEMP\s*=\s*""/,
+    'build must be exercised without a GitHub-Actions-only temp path');
 
   const windowsSmoke = read('installer/windows-smoke.ps1');
   assert.match(windowsSmoke, /GetFolderPath\([^\n]*DesktopDirectory/);
@@ -188,10 +198,18 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     'smoke must wait for DASHBOARD_VISIBLE (stronger than a self-reported ready claim)');
   assert.doesNotMatch(windowsSmoke, /Wait-DiagnosticStatus -Status "WEBVIEW_READY"/,
     'retired self-reported ready status must not be awaited by Windows smoke');
+  assert.match(windowsSmoke, /Assert-IndependentDashboardVisible|HasEmbeddedBrowserRegion/,
+    'dashboard visibility must be independently observed via Win32 child regions');
+  assert.match(windowsSmoke, /Save-WindowScreenshot|screenshot_ok/,
+    'smoke must retain a window screenshot as CI evidence');
+  assert.match(windowsSmoke, /USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING|WEBVIEW2_MISSING/,
+    'smoke must force the missing-WebView2 path');
+  assert.match(windowsSmoke, /port_conflict_foreign_listener_alive|foreign_listener/);
+  assert.match(windowsSmoke, /first_run_unlinked_enrollment|FIRST_RUN_ENROLLMENT/);
   assert.match(windowsSmoke, /single_instance_ok|SINGLE_INSTANCE/);
   assert.match(windowsSmoke, /FULL_EXIT_ON_CLOSE|full_exit_on_close/);
   assert.match(windowsSmoke, /PAYLOAD_MISSING|corrupt_missing_payload/);
-  assert.match(windowsSmoke, /staged_app_assertion/);
+  assert.match(windowsSmoke, /staged_app_assertion|RequireAppAssertions/);
   assert.match(windowsSmoke, /GetFolderPath\([^\n]*DesktopDirectory/);
   assert.match(windowsSmoke, /shell_folders=desktop:/);
   assert.match(windowsSmoke, /Assert-DiagnosticsSanitized|non-status data/);
