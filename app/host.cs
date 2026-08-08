@@ -275,28 +275,12 @@ internal sealed class MainForm : Form
     /// The embedded browser runtime is a separate Windows component. Detecting
     /// its absence lets us give the one remedy that works, instead of telling
     /// the customer to reinstall Usage Panel, which cannot install it.
+    /// The answer comes from the loader and from nowhere else: no override, no
+    /// environment variable, no flag. To exercise the missing-runtime screen,
+    /// change what the loader can find rather than what this method believes.
     /// </summary>
-    private static bool WebView2Available()
-    {
-        // CI smoke-only force: proves the in-window WEBVIEW2_MISSING path without
-        // uninstalling the runner runtime. Not used by customer shortcuts.
-        if (string.Equals(
-                Environment.GetEnvironmentVariable("USAGE_PANEL_SMOKE_FORCE_WEBVIEW2_MISSING"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        try
-        {
-            return !string.IsNullOrEmpty(CoreWebView2Environment.GetAvailableBrowserVersionString());
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool WebView2Available() =>
+        WebView2Availability.IsPresent(CoreWebView2Environment.GetAvailableBrowserVersionString);
 
     private static bool NodeOnPath()
     {
