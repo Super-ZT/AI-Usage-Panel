@@ -144,17 +144,15 @@ function saveCursor(cursor) {
  * only ways out of the queue are an acknowledgement or a visible quarantine.
  *
  * @param {Cursor} cursor
- * @param {string} lookbackFloor earliest day the aggregation window covers
  * @returns {string} day string to read from
  */
-function deliveryFrom(cursor, lookbackFloor) {
-  if (cursor.deliveryFloor) {
-    return cursor.deliveryFloor < lookbackFloor ? cursor.deliveryFloor : lookbackFloor;
-  }
+function deliveryFrom(cursor) {
+  // The floor is written below as `min(oldest unacknowledged day, aggregation
+  // window)`, so reading from it always covers at least the aggregation window.
   // First run after upgrading, or a restored store: nothing has recorded how
   // far back the backlog reaches, so look at everything the store still keeps.
   // The answer is persisted below, so this full scan happens once.
-  return '0000-01-01';
+  return cursor.deliveryFloor || '0000-01-01';
 }
 
 /**
@@ -180,7 +178,7 @@ function pending(options) {
   const sent = new Set(cursor.sent);
   const rejected = new Set(cursor.rejected);
   const lookbackFloor = events.utcDay(now - lookback * 24 * 3600 * 1000);
-  const all = events.read({ from: deliveryFrom(cursor, lookbackFloor) });
+  const all = events.read({ from: deliveryFrom(cursor) });
 
   const unsent = all.filter((e) => e.event_id && !sent.has(e.event_id) && !rejected.has(e.event_id));
   const due = [];

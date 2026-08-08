@@ -370,10 +370,17 @@ function config(endpoint, credential) {
   });
 
   await test('back-filled old usage found later is still picked up', async () => {
-    // The delivery floor has just moved forward because the backlog cleared.
-    // Usage the log reader only discovers now, dated inside the scan window,
+    // The dangerous state: the only thing waiting is today's usage, so the
+    // delivery floor is computed from a recent day. Usage the log reader only
+    // discovers afterwards, dated earlier but still inside the scan window,
     // must not fall behind that floor.
-    const backfilled = await appendEvent(30);
+    await resetState();
+    const today = await appendEvent(0);
+    const beforeFloor = outbox.status();          // forces the floor to be computed
+    assert.equal(beforeFloor.pendingTotal, 1, 'only today\'s usage is waiting');
+    assert.ok(outbox.loadCursor().deliveryFloor, 'a delivery floor has been recorded');
+
+    const backfilled = await appendEvent(30);     // discovered only now
     const seen = [];
     const collector = await startCollector((body) => {
       for (const e of body.events) seen.push(e.eventId);
@@ -381,8 +388,9 @@ function config(endpoint, credential) {
     });
     try {
       const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
-      assert.equal(result.sent, 1, 'the newly discovered 30-day-old event is delivered');
-      assert.ok(seen.includes(backfilled));
+      assert.equal(result.sent, 2, 'both the recent and the back-filled event are delivered');
+      assert.ok(seen.includes(backfilled), 'the 30-day-old event was not hidden behind the floor');
+      assert.ok(seen.includes(today));
     } finally { await collector.close(); }
   });
 
