@@ -280,7 +280,7 @@ internal sealed class MainForm : Form
     /// change what the loader can find rather than what this method believes.
     /// </summary>
     private static bool WebView2Available() =>
-        WebView2Availability.IsPresent(CoreWebView2Environment.GetAvailableBrowserVersionString);
+        WebView2Availability.IsPresent(() => CoreWebView2Environment.GetAvailableBrowserVersionString());
 
     private static bool NodeOnPath()
     {
