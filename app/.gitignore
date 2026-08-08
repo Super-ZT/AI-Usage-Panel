@@ -1,0 +1,6 @@
+# Build output for the native Windows app and its tests. The repository's
+# top-level bin/ is tracked client code, so the ignore is scoped here.
+bin/
+obj/
+tests/bin/
+tests/obj/
