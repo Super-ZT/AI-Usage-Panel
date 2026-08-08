@@ -32,14 +32,37 @@ internal static class Program
             return;
         }
 
-        // Nothing above this line may fail silently: an unhandled exception on
-        // the UI thread is what "nothing happens" looked like in v1.0.2.
+        // An unhandled exception is what "nothing happens" looked like in
+        // v1.0.2, so it must end on a message the customer can read. Only the
+        // fixed sentence and a status word are shown or stored; the exception
+        // itself is never surfaced, because its text can carry a path or a
+        // credential.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += (_, _) => { };
-        AppDomain.CurrentDomain.UnhandledException += (_, _) => { };
+        Application.ThreadException += (_, _) => ReportUnexpectedError();
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => ReportUnexpectedError();
 
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm());
+    }
+
+    private static void ReportUnexpectedError()
+    {
+        try
+        {
+            new Diagnostics(MainForm.DiagnosticPath()).Record(StatusCodes.UnexpectedError);
+            MessageBox.Show(
+                "Usage Panel hit an unexpected problem and has to close.\n\n"
+                + "Open it again. If it keeps happening, reinstall Usage Panel.\n\n"
+                + "A private diagnostic status was saved. It contains no codes, credentials, "
+                + "prompts, or account details.",
+                MainWindowTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        catch
+        {
+            // Reporting the failure must not itself become a new failure.
+        }
     }
 
     /// <summary>

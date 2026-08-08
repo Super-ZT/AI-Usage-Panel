@@ -33,6 +33,8 @@ public static class StatusCodes
     public const string EnrollmentFailed = "ENROLLMENT_FAILED";
     public const string NetworkUnavailable = "NETWORK_UNAVAILABLE";
 
+    public const string UnexpectedError = "UNEXPECTED_ERROR";
+
     public const string SecondInstanceFocused = "SECOND_INSTANCE_FOCUSED";
     public const string ShutdownStarted = "SHUTDOWN_STARTED";
     public const string ShutdownComplete = "SHUTDOWN_COMPLETE";
@@ -47,7 +49,7 @@ public static class StatusCodes
         PortInUseForeign, ServerAlreadyReady, ServerStartRequested, ServerReady, ServerFailed,
         WebView2Missing, WebViewFailed, DashboardVisible, DashboardHidden,
         EnrollmentStarted, EnrollmentFinished, EnrollmentFailed, NetworkUnavailable,
-        SecondInstanceFocused, ShutdownStarted, ShutdownComplete,
+        UnexpectedError, SecondInstanceFocused, ShutdownStarted, ShutdownComplete,
         Unknown
     };
 
