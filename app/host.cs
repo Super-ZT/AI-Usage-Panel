@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using UsagePanel.Core;
 
 namespace UsagePanel;
 
@@ -10,8 +11,16 @@ internal static class Program
     internal const string MainWindowTitle = "Usage Panel";
     private const string MutexName = "Local\\SuperZT.UsagePanel";
 
+    private const int SW_RESTORE = 9;
+
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr window);
 
     [STAThread]
     private static void Main()
@@ -19,29 +28,93 @@ internal static class Program
         using var mutex = new Mutex(true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
-            foreach (var process in Process.GetProcessesByName("UsagePanel"))
-            {
-                if (process.Id != Environment.ProcessId && process.MainWindowHandle != IntPtr.Zero)
-                {
-                    SetForegroundWindow(process.MainWindowHandle);
-                    break;
-                }
-            }
+            FocusRunningInstance();
             return;
         }
 
+        // An unhandled exception is what "nothing happens" looked like in
+        // v1.0.2, so it must end on a message the customer can read. Only the
+        // fixed sentence and a status word are shown or stored; the exception
+        // itself is never surfaced, because its text can carry a path or a
+        // credential.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, _) => ReportUnexpectedError();
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => ReportUnexpectedError();
+
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm());
+    }
+
+    private static void ReportUnexpectedError()
+    {
+        try
+        {
+            new Diagnostics(MainForm.DiagnosticPath()).Record(StatusCodes.UnexpectedError);
+            MessageBox.Show(
+                "Usage Panel hit an unexpected problem and has to close.\n\n"
+                + "Open it again. If it keeps happening, reinstall Usage Panel.\n\n"
+                + "A private diagnostic status was saved. It contains no codes, credentials, "
+                + "prompts, or account details.",
+                MainWindowTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        catch
+        {
+            // Reporting the failure must not itself become a new failure.
+        }
+    }
+
+    /// <summary>
+    /// Brings the existing window forward. A minimised window must be restored
+    /// first; focusing it alone leaves the customer looking at an empty desktop
+    /// and concluding, correctly, that nothing happened.
+    /// </summary>
+    private static void FocusRunningInstance()
+    {
+        var diagnostics = new Diagnostics(MainForm.DiagnosticPath());
+        try
+        {
+            foreach (var process in Process.GetProcessesByName("UsagePanel"))
+            {
+                if (process.Id == Environment.ProcessId) continue;
+                var window = process.MainWindowHandle;
+                if (window == IntPtr.Zero) continue;
+
+                if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
+                SetForegroundWindow(window);
+                diagnostics.Record(StatusCodes.SecondInstanceFocused);
+                return;
+            }
+        }
+        catch
+        {
+            // Focusing is a courtesy; never let it crash the second launch.
+        }
     }
 }
 
 internal sealed class MainForm : Form
 {
     private const string PanelUrl = "http://127.0.0.1:8899";
+    private const int PanelPort = 8899;
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
     private readonly string appRoot = AppContext.BaseDirectory;
-    private readonly string diagnosticFile;
+    private readonly Diagnostics diagnostics;
+    private readonly PanelProbe probe = new("127.0.0.1", PanelPort);
     private readonly Label failureLabel;
+    private readonly Label noticeLabel;
     private readonly WebView2 browser;
+
+    private Process? serverLauncher;
+    private bool shutdownRecorded;
+
+    internal static string DiagnosticPath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "UsagePanel", "launcher.log");
 
     internal MainForm()
     {
@@ -55,9 +128,7 @@ internal sealed class MainForm : Form
         var icon = Path.Combine(appRoot, "usage-panel.ico");
         if (File.Exists(icon)) Icon = new Icon(icon);
 
-        diagnosticFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "UsagePanel", "launcher.log");
+        diagnostics = new Diagnostics(DiagnosticPath());
 
         failureLabel = new Label
         {
@@ -67,6 +138,18 @@ internal sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Font = new Font("Segoe UI", 14),
             Text = "Opening Usage Panel..."
+        };
+        noticeLabel = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 52,
+            Visible = false,
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(72, 52, 12),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(16, 0, 16, 0),
+            Font = new Font("Segoe UI", 10)
         };
         browser = new WebView2
         {
@@ -82,76 +165,164 @@ internal sealed class MainForm : Form
         };
         Controls.Add(browser);
         Controls.Add(failureLabel);
-        Shown += async (_, _) => await OpenPanelAsync();
+        Controls.Add(noticeLabel);
+
+        Shown += async (_, _) =>
+        {
+            // The window is on screen before any slow work begins; record the
+            // measured state rather than the intention.
+            diagnostics.Record(IsWindowVisible(Handle) ? StatusCodes.WindowVisible : StatusCodes.DashboardHidden);
+            await OpenPanelAsync();
+        };
+        FormClosing += (_, _) => Shutdown();
     }
 
-    private void Record(string status)
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(diagnosticFile)!;
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(diagnosticFile,
-                DateTimeOffset.UtcNow.ToString("O") + " " + status + Environment.NewLine);
-            var lines = File.ReadAllLines(diagnosticFile);
-            if (lines.Length > 100) File.WriteAllLines(diagnosticFile, lines[^100..]);
-        }
-        catch { }
-    }
+    private void Record(string status) => diagnostics.Record(status);
 
     private async Task OpenPanelAsync()
     {
-        Record("LAUNCH_STARTED");
+        Record(StatusCodes.LaunchStarted);
         try
         {
             ClearStaleStopMarker();
-            await EnrollIfNeededAsync();
-            if (!await EnsureServerAsync())
+
+            var payload = InstallPayload.Inspect(appRoot, NodeOnPath());
+            var port = await probe.ClassifyAsync();
+            var preflight = StartupPlan.PreFlight(payload, port, WebView2Available());
+            if (preflight is not null)
             {
-                ShowFailure("Usage Panel could not start. Please reinstall it, then try again.", "SERVER_FAILED");
+                ShowFailure(preflight);
                 return;
             }
 
-            await browser.EnsureCoreWebView2Async();
-            browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
-            browser.CoreWebView2.NavigationStarting += (_, args) =>
+            await EnrollIfNeededAsync();
+
+            if (port == PortState.OwnedByPanel) Record(StatusCodes.ServerAlreadyReady);
+            else if (StartupPlan.AfterServerStart(await StartServerAsync()) is { } serverFault)
             {
-                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target)
-                    || target.Scheme != Uri.UriSchemeHttp
-                    || target.Host != "127.0.0.1"
-                    || target.Port != 8899)
-                    args.Cancel = true;
-            };
-            browser.CoreWebView2.NavigationCompleted += (_, args) =>
-            {
-                if (!args.IsSuccess)
-                    ShowFailure("Usage Panel started, but its window could not load. Close it and try again.", "WEBVIEW_FAILED");
-                else
-                    Record("WEBVIEW_READY");
-            };
-            browser.Source = new Uri(PanelUrl);
-            failureLabel.Visible = false;
-            browser.Visible = true;
-            browser.BringToFront();
+                ShowFailure(serverFault);
+                return;
+            }
+
+            await ShowDashboardAsync();
         }
         catch
         {
-            ShowFailure("Usage Panel could not open. Please reinstall it, then try again.", "WEBVIEW_FAILED");
+            // Any unforeseen failure still ends on a visible screen.
+            ShowFailure(StartupPlan.NavigationFailed());
         }
     }
+
+    private async Task ShowDashboardAsync()
+    {
+        await browser.EnsureCoreWebView2Async();
+        browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
+        browser.CoreWebView2.NavigationStarting += (_, args) =>
+        {
+            if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target)
+                || target.Scheme != Uri.UriSchemeHttp
+                || target.Host != "127.0.0.1"
+                || target.Port != PanelPort)
+                args.Cancel = true;
+        };
+        browser.CoreWebView2.NavigationCompleted += (_, args) =>
+        {
+            if (!args.IsSuccess)
+            {
+                ShowFailure(StartupPlan.NavigationFailed());
+                return;
+            }
+
+            RevealDashboard();
+            // Measured, not asserted: if the reveal above is ever removed or
+            // overdrawn, this writes DASHBOARD_HIDDEN and the Windows smoke
+            // test fails. A log line that cannot disagree with the screen is
+            // how v1.0.2 passed while showing nothing.
+            Record(DashboardVisibility.StatusFor(ReadSurface()));
+        };
+        browser.Source = new Uri(PanelUrl);
+    }
+
+    private void RevealDashboard()
+    {
+        failureLabel.Visible = false;
+        browser.Visible = true;
+        browser.BringToFront();
+    }
+
+    /// <summary>Reads the real Win32 state of the window and the dashboard control.</summary>
+    private WindowSurface ReadSurface()
+    {
+        try
+        {
+            return new WindowSurface(
+                FormVisible: Visible,
+                FormMinimized: WindowState == FormWindowState.Minimized,
+                FormHandleVisible: IsWindowVisible(Handle),
+                DashboardControlVisible: browser.Visible,
+                FailureMessageVisible: failureLabel.Visible,
+                DashboardWidth: browser.Width,
+                DashboardHeight: browser.Height,
+                DashboardHandleVisible: IsWindowVisible(browser.Handle));
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    /// <summary>
+    /// The embedded browser runtime is a separate Windows component. Detecting
+    /// its absence lets us give the one remedy that works, instead of telling
+    /// the customer to reinstall Usage Panel, which cannot install it.
+    /// </summary>
+    private static bool WebView2Available()
+    {
+        try
+        {
+            return !string.IsNullOrEmpty(CoreWebView2Environment.GetAvailableBrowserVersionString());
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool NodeOnPath()
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path)) return false;
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(directory.Trim('"'), "node.exe"))) return true;
+            }
+            catch
+            {
+                // An unreadable PATH entry is simply not a match.
+            }
+        }
+        return false;
+    }
+
+    private string StopMarkerPath() => Path.Combine(appRoot, ".usage-panel-stop");
 
     private void ClearStaleStopMarker()
     {
         try
         {
-            var marker = Path.Combine(appRoot, ".usage-panel-stop");
+            var marker = StopMarkerPath();
             if (File.Exists(marker))
             {
                 File.Delete(marker);
-                Record("STALE_STOP_CLEARED");
+                Record(StatusCodes.StaleStopCleared);
             }
         }
-        catch { }
+        catch
+        {
+            // A marker we cannot delete surfaces later as SERVER_FAILED.
+        }
     }
 
     private async Task EnrollIfNeededAsync()
@@ -161,9 +332,22 @@ internal sealed class MainForm : Form
             "usage-panel", "enrollment.json");
         if (File.Exists(enrollment)) return;
 
-        Record("ENROLLMENT_STARTED");
+        if (!await new NetworkProbe().CanReachAsync())
+        {
+            ShowNotice(StartupPlan.NetworkUnavailable());
+            return;
+        }
+
+        Record(StatusCodes.EnrollmentStarted);
+        var script = Path.Combine(appRoot, "enroll-panel.ps1");
         var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),
             "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(script) || !File.Exists(powershell))
+        {
+            ShowNotice(StartupPlan.EnrollmentFailed());
+            return;
+        }
+
         var start = new ProcessStartInfo(powershell)
         {
             UseShellExecute = false,
@@ -174,23 +358,28 @@ internal sealed class MainForm : Form
         start.ArgumentList.Add("-ExecutionPolicy");
         start.ArgumentList.Add("Bypass");
         start.ArgumentList.Add("-File");
-        start.ArgumentList.Add(Path.Combine(appRoot, "enroll-panel.ps1"));
-        using var process = Process.Start(start);
-        if (process is not null) await process.WaitForExitAsync();
-        Record("ENROLLMENT_FINISHED");
+        start.ArgumentList.Add(script);
+
+        try
+        {
+            using var process = Process.Start(start);
+            if (process is null)
+            {
+                ShowNotice(StartupPlan.EnrollmentFailed());
+                return;
+            }
+            await process.WaitForExitAsync();
+            Record(StatusCodes.EnrollmentFinished);
+        }
+        catch
+        {
+            // Linking is optional; the local dashboard must still open.
+            ShowNotice(StartupPlan.EnrollmentFailed());
+        }
     }
 
-    private async Task<bool> EnsureServerAsync()
+    private async Task<bool> StartServerAsync()
     {
-        if (await ServerReadyAsync())
-        {
-            Record("SERVER_ALREADY_READY");
-            return true;
-        }
-
-        var stopMarker = Path.Combine(appRoot, ".usage-panel-stop");
-        try { if (File.Exists(stopMarker)) File.Delete(stopMarker); } catch { }
-
         var command = Path.Combine(appRoot, "start-panel.cmd");
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe")
         {
@@ -201,39 +390,99 @@ internal sealed class MainForm : Form
         start.ArgumentList.Add("/d");
         start.ArgumentList.Add("/c");
         start.ArgumentList.Add(command);
-        Process.Start(start);
-        Record("SERVER_START_REQUESTED");
+
+        try
+        {
+            serverLauncher = Process.Start(start);
+        }
+        catch
+        {
+            return false;
+        }
+        Record(StatusCodes.ServerStartRequested);
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(500);
-            if (await ServerReadyAsync())
+            if (await probe.AnswersAsPanelAsync())
             {
-                Record("SERVER_READY");
+                Record(StatusCodes.ServerReady);
                 return true;
             }
+            // A launcher that has already exited will never become ready.
+            if (serverLauncher is { HasExited: true }) return false;
         }
         return false;
     }
 
-    private static async Task<bool> ServerReadyAsync()
+    /// <summary>
+    /// Closing the window ends the whole product: v1.0.3 has no tray icon and
+    /// no hidden background mode, so nothing of ours may outlive the window.
+    /// Only executables inside the install directory are terminated.
+    /// </summary>
+    private void Shutdown()
     {
+        if (shutdownRecorded) return;
+        shutdownRecorded = true;
+        Record(StatusCodes.ShutdownStarted);
+
+        try { File.WriteAllText(StopMarkerPath(), string.Empty); } catch { }
+
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
-            using var response = await client.GetAsync(PanelUrl + "/api/sync");
-            return response.IsSuccessStatusCode;
+            if (serverLauncher is { HasExited: false }) serverLauncher.Kill(entireProcessTree: true);
         }
-        catch { return false; }
+        catch
+        {
+            // Already gone, or owned by another session.
+        }
+
+        foreach (var name in new[] { "node", "UsagePanel" })
+        {
+            foreach (var process in SafeProcessesByName(name))
+            {
+                try
+                {
+                    if (process.Id == Environment.ProcessId) continue;
+                    if (!ProcessOwnership.IsUnderRoot(process.MainModule?.FileName, appRoot)) continue;
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Unreadable or protected processes are left alone.
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+
+        Record(StatusCodes.ShutdownComplete);
     }
 
-    private void ShowFailure(string text, string status)
+    private static Process[] SafeProcessesByName(string name)
     {
-        Record(status);
-        Text = "Usage Panel - Could not open";
+        try { return Process.GetProcessesByName(name); }
+        catch { return Array.Empty<Process>(); }
+    }
+
+    /// <summary>A non-fatal problem shown above a working dashboard.</summary>
+    private void ShowNotice(StartupFault fault)
+    {
+        Record(fault.Status);
+        noticeLabel.Text = fault.Message;
+        noticeLabel.Visible = true;
+        noticeLabel.BringToFront();
+    }
+
+    private void ShowFailure(StartupFault fault)
+    {
+        Record(fault.Status);
+        Text = Program.MainWindowTitle + " - Could not open";
         browser.Visible = false;
-        failureLabel.Text = text + Environment.NewLine + Environment.NewLine
+        failureLabel.Text = fault.Message + Environment.NewLine + Environment.NewLine
             + "A private diagnostic status was saved. It contains no codes, credentials, prompts, or account details.";
         failureLabel.Visible = true;
         failureLabel.BringToFront();
