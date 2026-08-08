@@ -59,11 +59,21 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(host, /MainWindowTitle/,
     'the application must expose a stable title for visible-window verification');
   assert.match(host, /launcher\.log/);
-  assert.match(host, /SERVER_FAILED/);
   assert.match(host, /MessageBox|failureLabel/i,
     'startup failure must remain visible in plain English');
   assert.doesNotMatch(host, /WriteAllText\([^\n]+(?:UserName|UserProfile|code|credential|token)/i,
     'launcher diagnostics must not record identities or secrets');
+  // Status tokens live in the allowlist module — not in prose comments on host.cs.
+  const statusCodes = read('app/core/StatusCodes.cs');
+  assert.match(statusCodes, /ServerFailed\s*=\s*"SERVER_FAILED"/);
+  assert.match(statusCodes, /PortInUse\s*=\s*"PORT_IN_USE"/);
+  assert.match(statusCodes, /WebView2Missing\s*=\s*"WEBVIEW2_MISSING"/);
+  assert.match(statusCodes, /PayloadMissing\s*=\s*"PAYLOAD_MISSING"/);
+  assert.match(statusCodes, /EnrollmentFailed\s*=\s*"ENROLLMENT_FAILED"/);
+  assert.match(statusCodes, /DashboardVisible\s*=\s*"DASHBOARD_VISIBLE"/);
+  assert.match(statusCodes, /DashboardHidden\s*=\s*"DASHBOARD_HIDDEN"/);
+  assert.doesNotMatch(statusCodes, /WEBVIEW_READY/,
+    'WEBVIEW_READY is a retired self-reported claim and must not return');
 
   const start = read('start-panel.cmd');
   const bundled = start.indexOf('node\\node.exe');
@@ -174,6 +184,10 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /Assert-NoStaleLaunchers|stale launcher remained after upgrade/);
   assert.match(windowsSmoke, /enrollment_preserved=true|enrollment state/);
   assert.match(windowsSmoke, /PORT_IN_USE|port_conflict/);
+  assert.match(windowsSmoke, /Wait-DiagnosticStatus -Status "DASHBOARD_VISIBLE"/,
+    'smoke must wait for DASHBOARD_VISIBLE (stronger than a self-reported ready claim)');
+  assert.doesNotMatch(windowsSmoke, /Wait-DiagnosticStatus -Status "WEBVIEW_READY"/,
+    'retired self-reported ready status must not be awaited by Windows smoke');
   assert.match(windowsSmoke, /single_instance_ok|SINGLE_INSTANCE/);
   assert.match(windowsSmoke, /FULL_EXIT_ON_CLOSE|full_exit_on_close/);
   assert.match(windowsSmoke, /PAYLOAD_MISSING|corrupt_missing_payload/);

@@ -269,10 +269,12 @@ Assert-Shortcut -Path $LinkShortcutPath -TargetLeaf "powershell.exe" -ArgumentFr
 Start-Process $DesktopShortcutPath
 $visible = Wait-VisibleWindow
 Wait-PanelReady
-if (-not (Wait-DiagnosticStatus -Status "WEBVIEW_READY")) {
-  Note-StagedAppFailure -Name "WEBVIEW_READY" -Detail "app did not record WEBVIEW_READY; Opus owns in-app WebView2 ready signaling"
+# DASHBOARD_VISIBLE is recorded only after the app reads real window/surface
+# state, so a log line can disagree with the screen when the dashboard is hidden.
+if (-not (Wait-DiagnosticStatus -Status "DASHBOARD_VISIBLE")) {
+  Note-StagedAppFailure -Name "DASHBOARD_VISIBLE" -Detail "app did not record DASHBOARD_VISIBLE after a successful panel launch"
 } else {
-  Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true"
+  Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true;dashboard_visible=true"
 }
 
 # Relaunch / single-instance: second shell launch must not create a second host.
@@ -284,12 +286,12 @@ if ($hostCount -ne 1) {
 } else {
   Write-Host "single_instance_ok=process_count:1"
 }
-# Minimized restore path is app-owned; stage until Opus implements SW_RESTORE.
+# Second-instance path must restore a minimized primary window (SW_RESTORE in app/**).
 $iconic = Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Where-Object {
   $_.MainWindowHandle -ne 0 -and [UsagePanelWindowCheck]::IsIconic($_.MainWindowHandle)
 }
 if ($iconic) {
-  Note-StagedAppFailure -Name "MINIMIZED_RESTORE" -Detail "existing minimized window observed; app must restore before focus"
+  Note-StagedAppFailure -Name "MINIMIZED_RESTORE" -Detail "existing minimized window observed after second launch; app must SW_RESTORE before focus"
 }
 
 # Server child exit must leave a visible plain-English failure and status-only diagnostics.

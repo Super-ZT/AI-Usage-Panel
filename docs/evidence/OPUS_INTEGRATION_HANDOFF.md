@@ -4,32 +4,25 @@ This branch is the single recovery integration base. Grok owns installer,
 packaging, workflows, docs, and non-`app/**` integration evidence. Claude Opus
 owns only `app/**`.
 
-## Base identity (before Opus merge)
-
-Recorded at branch creation / Grok handoff commit; replace with final Grok
-commit hash when merging Opus:
+## Base identity
 
 - Branch: `grok-vps/v103-integration-base`
 - Start parent: `9ff02f89a59e79ee0113f538c521d0d98b64a1b7` (PR 5 head)
+- Grok integration base (pre-Opus): `280c96c3329717b8772cf9f2bca92f4b54111a78`
+- Opus app/** head integrated: `7c0990fac0d630fbbe95a8120cf8218949bacc08` (tree `5dbf7204…`)
+- Handoff source: `/tmp/usage-panel-opus-handoff/` (SHA256SUMS verified)
 
-## Exact merge steps
+## Exact merge steps (already applied)
 
 ```bash
 # On a clean worktree of grok-vps/v103-integration-base:
-git fetch origin
-git checkout grok-vps/v103-integration-base
-git merge --no-ff <opus-commit-sha> -m "Integrate Opus app/** into v1.0.3 recovery base"
+git fetch /tmp/usage-panel-opus-handoff/opus-native-app-hardening.bundle \
+  opus/native-app-hardening:opus/native-app-hardening
+git merge --no-ff 7c0990fac0d630fbbe95a8120cf8218949bacc08 \
+  -m "Integrate Opus app/** into v1.0.3 recovery base"
 
 # Verify Opus touched only app/**
-git diff --name-only <grok-head-before-merge>..HEAD | grep -v '^app/' && echo FAIL_NON_APP || echo only_app_or_empty
-```
-
-If Opus’s branch rebased onto something other than this base, prefer:
-
-```bash
-git checkout -b integrate-opus grok-vps/v103-integration-base
-git checkout <opus-commit-sha> -- app/
-git commit -m "Integrate Opus app/** tree at <opus-commit-sha>"
+git diff --name-only 280c96c..HEAD | grep -v '^app/' && echo FAIL_NON_APP || echo only_app_or_empty
 ```
 
 Do **not** push to Opus’s branch. Do **not** merge PR 5 as-is.
@@ -38,12 +31,15 @@ Do **not** push to Opus’s branch. Do **not** merge PR 5 as-is.
 
 | Status | Meaning |
 |--------|---------|
-| `WEBVIEW_READY` | Embedded dashboard ready in-window |
+| `DASHBOARD_VISIBLE` | Real window surface shows the dashboard (strict replacement for the old self-reported ready claim) |
+| `DASHBOARD_HIDDEN` | Window present but dashboard surface not visible |
 | `WEBVIEW2_MISSING` | WebView2 runtime absent; plain-English recovery, not “reinstall” |
 | `SERVER_FAILED` | Local server child failed |
 | `PORT_IN_USE` | Port 8899 occupied |
 | `PAYLOAD_MISSING` | Required client payload missing/corrupt |
 | `ENROLLMENT_FAILED` | Enrollment dialog/path failed (not labeled as browser failure) |
+
+Allowlist source of truth: `app/core/StatusCodes.cs` (not comments in `host.cs`).
 
 Diagnostics: only `ISO8601_TIMESTAMP STATUS_CODE` lines; no usernames, paths,
 codes, tokens, prompts, credentials, secrets, or raw exception text.
