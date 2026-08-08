@@ -411,22 +411,30 @@ if ($iconic) {
   Note-StagedAppFailure -Name "MINIMIZED_RESTORE" -Detail "existing minimized window observed after second launch; app must SW_RESTORE before focus"
 }
 
-# Server child exit must leave a visible plain-English failure and status-only diagnostics.
+# Server failure: keep required files present (otherwise PreFlight returns PAYLOAD_MISSING)
+# but make the local service unable to become ready → SERVER_FAILED.
 Stop-AllPanelProcesses
+Remove-Item $DiagnosticFile -Force -ErrorAction SilentlyContinue
 $refresher = Join-Path $InstallDir "refresher.js"
-$disabledRefresher = Join-Path $InstallDir "refresher.js.disabled"
-Move-Item $refresher $disabledRefresher
+$refresherBackup = Join-Path $InstallDir "refresher.js.smoke-backup"
+Copy-Item $refresher $refresherBackup -Force
+# Non-empty file so InstallPayload stays Ok; content that exits immediately so the panel never answers.
+Set-Content -Path $refresher -Value "process.exit(1);" -Encoding ascii
 try {
   Start-Process $DesktopShortcutPath
-  $failure = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 90
-  if (-not (Test-Path $DiagnosticFile)) { throw "sanitized diagnostic file was not written" }
-  $diagnostics = Get-Content $DiagnosticFile
-  if (-not ($diagnostics -match " SERVER_FAILED$")) { throw "server failure diagnostic was not recorded" }
+  $failure = Wait-VisibleWindow -Title "Usage Panel - Could not open" -Attempts 120
+  if (-not (Wait-DiagnosticStatus -Status "SERVER_FAILED")) {
+    if (Test-Path $DiagnosticFile) {
+      Get-Content $DiagnosticFile | ForEach-Object { Write-Host "diagnostic_line=$_" }
+    }
+    throw "server failure diagnostic was not recorded (expected SERVER_FAILED)"
+  }
   Assert-DiagnosticsSanitized
-  Write-Host "silent_child_exit=visible_plain_english_failure;diagnostics=status_only"
+  Write-Host "silent_child_exit=visible_plain_english_failure;diagnostics=status_only;status=SERVER_FAILED"
+  try { Save-WindowScreenshot -Process $failure -Name "server-failed" } catch { Write-Host "screenshot_server_failed_skipped=$($_.Exception.Message)" }
 } finally {
-  Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force
-  Move-Item $disabledRefresher $refresher -Force
+  Get-Process -Name "UsagePanel" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  if (Test-Path $refresherBackup) { Move-Item $refresherBackup $refresher -Force }
   Stop-AllPanelProcesses
 }
 

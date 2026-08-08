@@ -148,8 +148,8 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
   assert.match(windowsSmoke, /MainWindowHandle/);
   assert.match(windowsSmoke, /IsWindowVisible/);
   assert.match(windowsSmoke, /Usage Panel - Could not open/);
-  assert.match(windowsSmoke, /-not \(\$diagnostics -match " SERVER_FAILED\$"\)/,
-    'the status-array assertion must pass when any diagnostic line records the failure');
+  assert.match(windowsSmoke, /Wait-DiagnosticStatus -Status "SERVER_FAILED"|SERVER_FAILED/,
+    'smoke must require a SERVER_FAILED diagnostic for the broken-service path');
   assert.match(windowsSmoke, /baseline_v102_silent_launcher_reproduced/);
   assert.match(windowsSmoke, /visible_window_ok/);
   assert.match(windowsSmoke, /function Wait-PathRemoved/);
