@@ -17,7 +17,7 @@ public static class StatusCodes
     public const string PayloadMissing = "PAYLOAD_MISSING";
     public const string NodeMissing = "NODE_MISSING";
 
-    public const string PortInUseForeign = "PORT_IN_USE_FOREIGN";
+    public const string PortInUse = "PORT_IN_USE";
     public const string ServerAlreadyReady = "SERVER_ALREADY_READY";
     public const string ServerStartRequested = "SERVER_START_REQUESTED";
     public const string ServerReady = "SERVER_READY";
@@ -46,7 +46,7 @@ public static class StatusCodes
     {
         LaunchStarted, WindowVisible, StaleStopCleared,
         PayloadMissing, NodeMissing,
-        PortInUseForeign, ServerAlreadyReady, ServerStartRequested, ServerReady, ServerFailed,
+        PortInUse, ServerAlreadyReady, ServerStartRequested, ServerReady, ServerFailed,
         WebView2Missing, WebViewFailed, DashboardVisible, DashboardHidden,
         EnrollmentStarted, EnrollmentFinished, EnrollmentFailed, NetworkUnavailable,
         UnexpectedError, SecondInstanceFocused, ShutdownStarted, ShutdownComplete,

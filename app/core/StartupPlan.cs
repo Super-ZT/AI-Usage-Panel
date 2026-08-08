@@ -62,7 +62,7 @@ public static class StartupPlan
             return new StartupFault(StatusCodes.NodeMissing, NodeMissingMessage);
 
         if (port == PortState.ForeignListener)
-            return new StartupFault(StatusCodes.PortInUseForeign, PortInUseMessage);
+            return new StartupFault(StatusCodes.PortInUse, PortInUseMessage);
 
         return null;
     }

@@ -27,7 +27,7 @@ public sealed class StartupPlanTests
         var fault = StartupPlan.PreFlight(PayloadState.Ok, PortState.ForeignListener, webView2Available: true);
 
         Assert.NotNull(fault);
-        Assert.Equal(StatusCodes.PortInUseForeign, fault!.Status);
+        Assert.Equal(StatusCodes.PortInUse, fault!.Status);
         Assert.Contains("8899", fault.Message);
         Assert.Contains("will not close another program", fault.Message);
     }
