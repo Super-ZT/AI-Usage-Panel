@@ -214,6 +214,12 @@ function read(relative) { return fs.readFileSync(path.join(root, relative), 'utf
     'retired self-reported ready status must not be awaited by Windows smoke');
   assert.match(windowsSmoke, /Assert-IndependentDashboardVisible|HasEmbeddedBrowserRegion/,
     'dashboard visibility must be independently observed via Win32 child regions');
+  assert.match(windowsSmoke, /Assert-DashboardContentRendered|Test-DashboardScreenshotShowsContent/,
+    'smoke must prove actual dashboard paint, not only a Chromium child HWND');
+  assert.match(windowsSmoke, /dashboard_content_rendered|unique:|lit_frac/,
+    'content proof must measure center-region pixel diversity / luminance');
+  assert.match(windowsSmoke, /PW_RENDERFULLCONTENT|PrintWindow/,
+    'screenshot path must capture WebView2/GPU content, not only the frame');
   assert.match(windowsSmoke, /Save-WindowScreenshot|screenshot_ok/,
     'smoke must retain a window screenshot as CI evidence');
   assert.match(windowsSmoke, /WEBVIEW2_BROWSER_EXECUTABLE_FOLDER/,

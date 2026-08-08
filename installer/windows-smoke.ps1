@@ -169,7 +169,22 @@ function Save-WindowScreenshot {
   $bitmap = New-Object System.Drawing.Bitmap $width, $height
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   try {
-    $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($width, $height)))
+    # Prefer PrintWindow with PW_RENDERFULLCONTENT so GPU/WebView2 surfaces are
+    # included; fall back to a desktop copy if PrintWindow fails.
+    $hdc = $graphics.GetHdc()
+    $printed = $false
+    try {
+      # 2 = PW_RENDERFULLCONTENT (captures DirectComposition / Chromium content)
+      $printed = [UsagePanelWindowCheck]::PrintWindow($handle, $hdc, 2)
+    } finally {
+      $graphics.ReleaseHdc($hdc)
+    }
+    if (-not $printed) {
+      $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($width, $height)))
+      Write-Host "screenshot_capture=CopyFromScreen"
+    } else {
+      Write-Host "screenshot_capture=PrintWindow_PW_RENDERFULLCONTENT"
+    }
     $path = Join-Path $EvidenceDir "$Name.png"
     $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     Write-Host "screenshot_ok=path:$path;bytes:$((Get-Item $path).Length);size:${width}x${height}"
@@ -177,6 +192,64 @@ function Save-WindowScreenshot {
   } finally {
     $graphics.Dispose()
     $bitmap.Dispose()
+  }
+}
+
+function Test-DashboardScreenshotShowsContent {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  # A Chrome_RenderWidgetHostHWND proves only that a browser surface exists.
+  # v1.0.2-class false greens left a pure-black client area. Fail closed unless
+  # the center of the captured window has real paint (not one near-black color).
+  if (-not (Test-Path -LiteralPath $Path)) { return $false }
+  $bytes = [System.IO.File]::ReadAllBytes($Path)
+  $ms = New-Object System.IO.MemoryStream(,$bytes)
+  $bmp = $null
+  try {
+    $bmp = [System.Drawing.Bitmap]::FromStream($ms)
+    $w = $bmp.Width
+    $h = $bmp.Height
+    if ($w -lt 400 -or $h -lt 300) { return $false }
+    # Center of the client area (skip title bar / chrome edges).
+    $x0 = [int]([Math]::Floor($w * 0.20))
+    $x1 = [int]([Math]::Floor($w * 0.80))
+    $y0 = [int]([Math]::Max(40, [Math]::Floor($h * 0.25)))
+    $y1 = [int]([Math]::Floor($h * 0.85))
+    $step = 2
+    $unique = New-Object 'System.Collections.Generic.HashSet[int]'
+    $total = 0
+    $lit = 0
+    $maxC = 0
+    for ($y = $y0; $y -lt $y1; $y += $step) {
+      for ($x = $x0; $x -lt $x1; $x += $step) {
+        $c = $bmp.GetPixel($x, $y)
+        $total++
+        $key = (($c.R -shl 16) -bor ($c.G -shl 8) -bor $c.B)
+        [void]$unique.Add($key)
+        $lum = (0.2126 * $c.R) + (0.7152 * $c.G) + (0.0722 * $c.B)
+        if ($lum -ge 20.0) { $lit++ }
+        if ($c.R -gt $maxC) { $maxC = $c.R }
+        if ($c.G -gt $maxC) { $maxC = $c.G }
+        if ($c.B -gt $maxC) { $maxC = $c.B }
+      }
+    }
+    if ($total -lt 1000) { return $false }
+    $litFrac = $lit / [double]$total
+    $uniqueCount = $unique.Count
+    # Calibrated against the blocked black capture (unique≈1, lit≈0, maxc≈11)
+    # vs a real dark-theme dashboard paint (unique≥100, lit>1%, maxc≥40).
+    Write-Host ("dashboard_content_probe=unique:{0};lit_frac:{1};maxc:{2};samples:{3};region:{4},{5}-{6},{7}" -f `
+      $uniqueCount, ([Math]::Round($litFrac, 4)), $maxC, $total, $x0, $y0, $x1, $y1)
+    if ($uniqueCount -lt 25) { return $false }
+    if ($litFrac -lt 0.01) { return $false }
+    if ($maxC -lt 40) { return $false }
+    Write-Host "dashboard_content_rendered=true;unique:$uniqueCount;lit_frac:$([Math]::Round($litFrac,4));maxc:$maxC"
+    return $true
+  } catch {
+    Write-Host "dashboard_content_probe_error=$($_.Exception.Message)"
+    return $false
+  } finally {
+    if ($bmp) { $bmp.Dispose() }
+    $ms.Dispose()
   }
 }
 
@@ -213,6 +286,39 @@ function Assert-IndependentDashboardVisible {
   $children = [UsagePanelWindowCheck]::ListVisibleChildren($handle)
   Write-Host "independent_dashboard_children=$($children -join ',')"
   throw "independent visibility failed: no nonzero-size embedded browser/content region"
+}
+
+function Assert-DashboardContentRendered {
+  param(
+    [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
+    [string]$Name = "dashboard-visible"
+  )
+  # HWND + DASHBOARD_VISIBLE are necessary but not sufficient: the blocked
+  # candidate had both and still showed a pure-black client. Poll captures until
+  # center-region pixels prove real dashboard paint, or fail closed.
+  $deadline = [DateTimeOffset]::UtcNow.AddSeconds(60)
+  $lastPath = $null
+  while ([DateTimeOffset]::UtcNow -lt $deadline) {
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      throw "dashboard content proof failed: UsagePanel exited before paint"
+    }
+    try {
+      $lastPath = Save-WindowScreenshot -Process $Process -Name $Name
+      if (Test-DashboardScreenshotShowsContent -Path $lastPath) {
+        Write-Host "dashboard_content_ok=path:$lastPath"
+        return $lastPath
+      }
+      Write-Host "dashboard_content_waiting=black_or_empty_client;retrying"
+    } catch {
+      Write-Host "dashboard_content_capture_retry=$($_.Exception.Message)"
+    }
+    Start-Sleep -Milliseconds 750
+  }
+  if ($lastPath -and (Test-Path -LiteralPath $lastPath)) {
+    Write-Host "dashboard_content_failed_evidence=$lastPath;bytes=$((Get-Item $lastPath).Length)"
+  }
+  throw "dashboard content proof failed: center client stayed blank/black after browser HWND was present"
 }
 
 function Wait-DiagnosticStatus {
@@ -391,8 +497,8 @@ if (-not (Wait-DiagnosticStatus -Status "DASHBOARD_VISIBLE")) {
   Note-StagedAppFailure -Name "DASHBOARD_VISIBLE" -Detail "app did not record DASHBOARD_VISIBLE after a successful panel launch"
 }
 Assert-IndependentDashboardVisible -Process $visible
-Save-WindowScreenshot -Process $visible -Name "dashboard-visible"
-Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true;dashboard_visible=true;independent_hwnd=true"
+Assert-DashboardContentRendered -Process $visible -Name "dashboard-visible"
+Write-Host "visible_window_ok=title:$($visible.MainWindowTitle):handle_nonzero:true;dashboard_visible=true;independent_hwnd=true;dashboard_content=true"
 
 # Relaunch / single-instance: second shell launch must not create a second host.
 Start-Process $DesktopShortcutPath
