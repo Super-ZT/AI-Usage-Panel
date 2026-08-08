@@ -199,8 +199,8 @@ function config(endpoint, credential) {
     try {
       const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
       assert.equal(result.ok, true);
-      assert.equal(result.deferred, 1, 'the event is held back');
-      assert.equal(result.rejected, 0, 'it is NOT counted as permanently rejected');
+      assert.equal(result.deferred || 0, 1, 'the event is held back');
+      assert.equal(result.rejected || 0, 0, 'it is NOT counted as permanently rejected');
       const cursor = outbox.loadCursor();
       assert.ok(!cursor.rejected.includes(id), 'the event is not quarantined forever');
       assert.ok(cursor.deferred[id], 'the event is recorded for a later attempt');
@@ -252,7 +252,7 @@ function config(endpoint, credential) {
     try {
       const result = await client.push(config(collector.endpoint, CREDENTIAL_A));
       assert.equal(result.rejected, 1, 'counted as permanently rejected');
-      assert.equal(result.deferred, 0, 'not scheduled for a retry');
+      assert.equal(result.deferred || 0, 0, 'not scheduled for a retry');
       assert.ok(outbox.loadCursor().rejected.includes(id), 'quarantined');
     } finally { await collector.close(); }
   });

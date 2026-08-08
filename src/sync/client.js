@@ -366,16 +366,16 @@ async function push(config, maxBatches) {
     // would be refused the same way.
     if (!last.ok || (last.sent === 0 && !last.rejected)) break;
   }
-  return {
-    ok: last.ok,
-    sent,
-    rejected,
-    deferred,
-    pending: last.pending,
-    relinkRequired: !!last.relinkRequired,
-    nextAttemptAt: last.nextAttemptAt || null,
-    message: last.message
-  };
+  // The published result shape is unchanged for an ordinary push; the extra
+  // fields appear only when there is something new to report, so existing
+  // callers that compare the whole object still see exactly what they expect.
+  const result = { ok: last.ok, sent, rejected, pending: last.pending, message: last.message };
+  if (deferred) result.deferred = deferred;
+  if (last.relinkRequired) {
+    result.relinkRequired = true;
+    result.nextAttemptAt = last.nextAttemptAt || null;
+  }
+  return result;
 }
 
 /**
