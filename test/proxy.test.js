@@ -15,7 +15,7 @@ const {
   normalizeUsage, usageFromBody, modelFromBody, StreamCapture, ensureUsageReporting
 } = require('../src/proxy/capture');
 const { resolveUpstream } = require('../src/proxy/upstreams');
-const { createProxyServer, redactHeaders } = require('../src/proxy');
+const { createProxyServer, classifyModelIdentity, redactHeaders } = require('../src/proxy');
 
 let passed = 0;
 const failures = [];
@@ -215,6 +215,22 @@ async function routingTests() {
     assert.strictEqual(r['x-api-key'], '[redacted]');
     assert.strictEqual(r.accept, 'application/json');
   });
+
+  await test('model evidence never upgrades request or custom-upstream claims', () => {
+    assert.deepStrictEqual(classifyModelIdentity('served', 'asked', true), {
+      model: 'served', observedModel: 'served', requestedModel: 'asked',
+      modelEvidence: 'provider_response', modelVerified: true
+    });
+    assert.deepStrictEqual(classifyModelIdentity('custom-says-served', 'asked', false), {
+      model: null, observedModel: 'custom-says-served', requestedModel: 'asked',
+      modelEvidence: 'provider_response', modelVerified: false
+    });
+    assert.deepStrictEqual(classifyModelIdentity(null, 'asked', true), {
+      model: null, observedModel: null, requestedModel: 'asked',
+      modelEvidence: 'requested_only', modelVerified: false
+    });
+    assert.strictEqual(classifyModelIdentity(null, null, true).modelEvidence, 'unknown');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -293,9 +309,14 @@ async function e2eTests() {
     assert.strictEqual(events.length, 1);
     const ev = events[0];
     assert.strictEqual(ev.harness, 'opencode');
+    assert.strictEqual(ev.harnessEvidence, 'configured_route');
+    assert.strictEqual(ev.harnessVerified, false);
     assert.strictEqual(ev.provider, 'fake');
-    assert.strictEqual(ev.model, 'anthropic/claude-opus-4.8', 'served model wins over requested alias');
+    assert.strictEqual(ev.model, null, 'a custom upstream model must not be presented as verified');
+    assert.strictEqual(ev.observedModel, 'anthropic/claude-opus-4.8');
     assert.strictEqual(ev.requestedModel, 'auto');
+    assert.strictEqual(ev.modelEvidence, 'provider_response');
+    assert.strictEqual(ev.modelVerified, false);
     assert.strictEqual(ev.usage.in, 100);
     assert.strictEqual(ev.usage.cacheRead, 900);
     assert.strictEqual(ev.usage.out, 42);
@@ -338,6 +359,37 @@ async function e2eTests() {
     assert.strictEqual(events[0].streamed, true);
     assert.strictEqual(events[0].usage.out, 7);
     assert.strictEqual(events[0].harness, 'pi');
+    assert.strictEqual(events[0].model, null);
+    assert.strictEqual(events[0].observedModel, 'gpt-5.6-sol');
+    assert.strictEqual(events[0].modelEvidence, 'provider_response');
+    assert.strictEqual(events[0].modelVerified, false);
+
+    proxy.close();
+    await upstream.close();
+  });
+
+  await test('request-only model stays visibly unverified when the response omits it', async () => {
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"usage":{"prompt_tokens":4,"completion_tokens":2}}');
+    });
+    const events = [];
+    const proxy = createProxyServer({
+      onEvent: (e) => events.push(e),
+      providers: { fake: { baseUrl: 'http://127.0.0.1:' + upstream.port } }
+    });
+    await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
+
+    const res = await post(proxy.address().port, '/opencode/fake/v1/chat/completions', {
+      model: 'user-supplied-model', messages: []
+    });
+    assert.strictEqual(res.status, 200);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(events[0].model, null);
+    assert.strictEqual(events[0].observedModel, null);
+    assert.strictEqual(events[0].requestedModel, 'user-supplied-model');
+    assert.strictEqual(events[0].modelEvidence, 'requested_only');
+    assert.strictEqual(events[0].modelVerified, false);
 
     proxy.close();
     await upstream.close();
@@ -389,7 +441,7 @@ async function e2eTests() {
     await new Promise((resolve, reject) => {
       const data = Buffer.from(JSON.stringify({ model: 'm' }));
       const rq = http.request({
-        host: '127.0.0.1', port: proxy.address().port, path: '/oc/fake/v1/chat/completions',
+        host: '127.0.0.1', port: proxy.address().port, path: '/opencode/fake/v1/chat/completions',
         method: 'POST',
         headers: { 'content-type': 'application/json', 'content-length': data.length, 'accept-encoding': 'gzip, deflate, br' }
       }, (res) => { res.resume(); res.on('end', resolve); });
@@ -431,7 +483,10 @@ async function e2eTests() {
     await new Promise((r) => setTimeout(r, 50));
     assert.ok(events[0].usage, 'array-shaped streaming body must yield usage');
     assert.strictEqual(events[0].usage.out, 60);
-    assert.strictEqual(events[0].model, 'gemini-3.1-pro');
+    assert.strictEqual(events[0].model, null);
+    assert.strictEqual(events[0].observedModel, 'gemini-3.1-pro');
+    assert.strictEqual(events[0].modelEvidence, 'provider_response');
+    assert.strictEqual(events[0].modelVerified, false);
     proxy.close();
     await upstream.close();
   });
@@ -440,7 +495,7 @@ async function e2eTests() {
     const proxy = createProxyServer({ onEvent: () => {} });
     await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
     for (const key of ['constructor', '__proto__', 'toString']) {
-      const res = await post(proxy.address().port, '/x/' + key + '/v1/chat', { model: 'm' });
+      const res = await post(proxy.address().port, '/opencode/' + key + '/v1/chat', { model: 'm' });
       assert.strictEqual(res.status, 404, key + ' must not resolve to an upstream');
     }
     proxy.close();
@@ -461,7 +516,7 @@ async function e2eTests() {
     await new Promise((resolve, reject) => {
       const data = Buffer.from('{"model":"m"}');
       const rq = http.request({
-        host: '127.0.0.1', port: proxy.address().port, path: '/x/fake/v1/c', method: 'POST',
+        host: '127.0.0.1', port: proxy.address().port, path: '/opencode/fake/v1/c', method: 'POST',
         headers: {
           'content-type': 'application/json', 'content-length': data.length,
           connection: 'x-internal-secret', 'x-internal-secret': 'leak-me'
@@ -477,7 +532,7 @@ async function e2eTests() {
   await test('oversized body returns 413 to the client (regression: M3)', async () => {
     const proxy = createProxyServer({ onEvent: () => {}, maxRequestBytes: 512 });
     await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
-    const res = await post(proxy.address().port, '/x/openai/v1/chat', { model: 'm', pad: 'x'.repeat(4096) });
+    const res = await post(proxy.address().port, '/opencode/openai/v1/chat', { model: 'm', pad: 'x'.repeat(4096) });
     assert.strictEqual(res.status, 413, 'client must actually receive the 413');
     proxy.close();
   });
@@ -485,9 +540,28 @@ async function e2eTests() {
   await test('unknown provider returns 404 without contacting anything', async () => {
     const proxy = createProxyServer({ onEvent: () => {} });
     await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
-    const res = await post(proxy.address().port, '/x/not-a-provider/v1/chat', { model: 'm' });
+    const res = await post(proxy.address().port, '/opencode/not-a-provider/v1/chat', { model: 'm' });
     assert.strictEqual(res.status, 404);
     proxy.close();
+  });
+
+  await test('invented free-path harness labels are rejected before forwarding', async () => {
+    let contacted = false;
+    const upstream = await startFakeUpstream((_req, res) => {
+      contacted = true;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"usage":{"prompt_tokens":1,"completion_tokens":1}}');
+    });
+    const proxy = createProxyServer({
+      onEvent: () => {},
+      providers: { fake: { baseUrl: 'http://127.0.0.1:' + upstream.port } }
+    });
+    await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
+    const res = await post(proxy.address().port, '/invented-agent/fake/v1/chat', { model: 'm' });
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(contacted, false, 'unknown harness must fail before any credential is forwarded');
+    proxy.close();
+    await upstream.close();
   });
 }
 

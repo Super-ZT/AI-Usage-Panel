@@ -24,6 +24,7 @@ const { Transform, pipeline } = require('stream');
 
 const { StreamCapture, usageFromBody, modelFromBody, mergeUsage, ensureUsageReporting } = require('./capture');
 const { resolveUpstream } = require('./upstreams');
+const harnessRegistry = require('../detect/registry');
 
 /** Headers that must never be logged or emitted anywhere. */
 const SECRET_HEADERS = new Set([
@@ -118,10 +119,15 @@ function readBody(req, limitBytes) {
 
 /**
  * @typedef {object} ProxyEvent
- * @property {string} harness      route segment identifying the calling tool
+ * @property {string} harness      canonical registry id for the configured route
+ * @property {'configured_route'} harnessEvidence
+ * @property {false} harnessVerified route configuration is not process attestation
  * @property {string} provider     upstream provider key
- * @property {string|null} model   model reported by the provider, else requested
+ * @property {string|null} model   model safe to present as served, else null
+ * @property {string|null} observedModel model reported in the response, trusted or not
  * @property {string|null} requestedModel
+ * @property {'provider_response'|'requested_only'|'unknown'} modelEvidence
+ * @property {boolean} modelVerified true only for a built-in HTTPS provider response
  * @property {{in:number,out:number,cacheRead:number,cacheWrite:number,reasoning:number}|null} usage
  * @property {number} status       upstream HTTP status
  * @property {boolean} streamed
@@ -129,6 +135,48 @@ function readBody(req, limitBytes) {
  * @property {string} ts           ISO-8601 UTC
  * @property {string|null} requestId provider request id when supplied
  */
+
+/**
+ * Classify the model strings seen around one proxy request.
+ *
+ * Request bodies and custom upstreams are controlled by the local user. Keep
+ * those observations for diagnostics, but do not put them in `model`, because
+ * downstream consumers historically present that field as the served model.
+ *
+ * @param {string|null} responseModel
+ * @param {string|null} requestedModel
+ * @param {boolean} trustedProviderResponse built-in provider over HTTPS
+ * @returns {{model:string|null,observedModel:string|null,requestedModel:string|null,modelEvidence:'provider_response'|'requested_only'|'unknown',modelVerified:boolean}}
+ */
+function classifyModelIdentity(responseModel, requestedModel, trustedProviderResponse) {
+  const observed = responseModel ? String(responseModel) : null;
+  const requested = requestedModel ? String(requestedModel) : null;
+  if (observed) {
+    return {
+      model: trustedProviderResponse ? observed : null,
+      observedModel: observed,
+      requestedModel: requested,
+      modelEvidence: 'provider_response',
+      modelVerified: trustedProviderResponse === true
+    };
+  }
+  if (requested) {
+    return {
+      model: null,
+      observedModel: null,
+      requestedModel: requested,
+      modelEvidence: 'requested_only',
+      modelVerified: false
+    };
+  }
+  return {
+    model: null,
+    observedModel: null,
+    requestedModel: null,
+    modelEvidence: 'unknown',
+    modelVerified: false
+  };
+}
 
 /**
  * Create the capture proxy server.
@@ -182,8 +230,13 @@ function createProxyServer(options) {
       throw Object.assign(new Error('path must be /<harness>/<provider>/<upstream path>'), { statusCode: 404 });
     }
 
-    const harness = segments[0];
-    const providerKey = segments[1];
+    const harnessSignature = harnessRegistry.byId(segments[0]);
+    if (!harnessSignature) {
+      throw Object.assign(new Error('unknown harness: ' + segments[0]), { statusCode: 404 });
+    }
+    const harness = harnessSignature.id;
+    const providerKey = segments[1].toLowerCase();
+    const customProvider = Object.prototype.hasOwnProperty.call(providers, providerKey);
     const upstream = resolveUpstream(providerKey, providers);
     if (!upstream) {
       throw Object.assign(new Error('unknown provider: ' + providerKey), { statusCode: 404 });
@@ -283,15 +336,25 @@ function createProxyServer(options) {
         } catch (_) { /* unparseable response: emit what we know */ }
 
         try {
+          const responseStatus = upstreamRes.statusCode || 0;
+          const identity = classifyModelIdentity(
+            model,
+            requestedModel,
+            !customProvider && upstream.protocol === 'https:'
+              && responseStatus >= 200 && responseStatus < 300
+          );
           onEvent({
             harness,
+            harnessEvidence: 'configured_route',
+            harnessVerified: false,
             provider: providerKey,
-            // The provider's reported model is authoritative: routers such as
-            // OpenRouter resolve aliases to a concrete served model.
-            model: model || requestedModel,
-            requestedModel,
+            model: identity.model,
+            observedModel: identity.observedModel,
+            requestedModel: identity.requestedModel,
+            modelEvidence: identity.modelEvidence,
+            modelVerified: identity.modelVerified,
             usage,
-            status: upstreamRes.statusCode || 0,
+            status: responseStatus,
             streamed: isStream,
             durationMs: Date.now() - startedAt,
             ts: new Date().toISOString(),
@@ -329,4 +392,4 @@ function createProxyServer(options) {
   return server;
 }
 
-module.exports = { createProxyServer, redactHeaders, SECRET_HEADERS };
+module.exports = { createProxyServer, classifyModelIdentity, redactHeaders, SECRET_HEADERS };
