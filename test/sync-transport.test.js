@@ -456,20 +456,39 @@ function config(endpoint, credential) {
     } finally { await collector.close(); }
   });
 
-  await test('an event with no recorded evidence is sent as unknown, never invented', async () => {
+  await test('evidence is passed through as stored, and never invented when absent', async () => {
     await resetState();
     outbox.setContractTier('full');
-    // This base predates the evidence fields, so nothing on disk carries them.
     await appendEvent(0, { source: 'local_log' });
     const seen = [];
     const collector = await startCollector(strictCollector(EVIDENCE_KEYS, seen));
     try {
       await client.push(config(collector.endpoint, CREDENTIAL_A));
-      assert.equal(seen[0].harnessEvidence, 'unknown', 'no provenance is inferred from the source field');
-      assert.equal(seen[0].modelEvidence, 'unknown');
+      const stored = events.read({ from: '1970-01-01' })
+        .find((e) => e.event_id === seen[0].eventId);
+      // Holds whether or not this build's store records evidence: the wire
+      // carries exactly what was stored, and 'unknown' when nothing was.
+      assert.equal(seen[0].harnessEvidence,
+        typeof stored.harness_evidence === 'string' ? stored.harness_evidence : 'unknown');
+      assert.equal(seen[0].modelEvidence,
+        typeof stored.model_evidence === 'string' ? stored.model_evidence : 'unknown');
+      assert.equal(seen[0].harnessVerified, stored.harness_verified === true);
+      assert.equal(seen[0].modelVerified, stored.model_verified === true);
       assert.equal(seen[0].harnessVerified, false, 'nothing claims a verified harness');
-      assert.equal(seen[0].modelVerified, false, 'nothing claims a verified model');
     } finally { await collector.close(); }
+  });
+
+  await test('an event carrying no evidence at all is sent as unknown, never inferred', async () => {
+    // Deterministic at any base: a bare event object, not one the store shaped.
+    const wire = client.portalEvent({
+      event_id: 'bare-1', harness: 'claude-code', provider: 'anthropic',
+      model: 'claude-opus-5', source: 'local_log', ts: new Date().toISOString(),
+      tokens: { in: 10, out: 5 }
+    }, 'full');
+    assert.equal(wire.harnessEvidence, 'unknown', 'no provenance is inferred from the source field');
+    assert.equal(wire.modelEvidence, 'unknown');
+    assert.equal(wire.harnessVerified, false);
+    assert.equal(wire.modelVerified, false);
   });
 
   await test('the displayed model is exactly what the store holds, never substituted', async () => {
