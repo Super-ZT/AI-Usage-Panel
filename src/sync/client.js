@@ -133,8 +133,13 @@ function evidenceOf(event) {
 
 /**
  * Translate a local usage fact to the strict Super ZT portal event contract.
+ *
+ * The base contract is the default because it is the one every collector
+ * accepts; the optional fields are opt-in, so a caller can never widen the
+ * payload by accident. `pushOnce` passes the negotiated tier explicitly.
+ *
  * @param {object} event
- * @param {string} [tier='full'] how much of the optional contract to include
+ * @param {string} [tier='base'] how much of the optional contract to include
  */
 function portalEvent(event, tier) {
   const tokens = event.tokens || {};
@@ -166,7 +171,7 @@ function portalEvent(event, tier) {
     occurredAt: event.ts
   };
 
-  const level = tier || 'full';
+  const level = tier || 'base';
   if (level === 'base') return wire;
 
   // The catalogue id for a model string that is not itself priceable
